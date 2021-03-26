@@ -8,7 +8,7 @@ This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute
 Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Cmd+Shift+Enter*. 
 
 # Setup
-```{r}
+```{r, message=FALSE}
 library(ggplot2)
 library(Biostrings)
 library('seqinr')
@@ -23,23 +23,30 @@ path.blast.res <- '/Volumes/Samsung_T5/vienn/blast_res/'
 
 # Read data
 ```{r}
-base.file = 'TAIR10_chr1.fas'
+
+query.chr = 1
+base.chr = 1
+
+query.chr = 2
+base.chr = 2
+
+base.file = paste0('TAIR10_chr', query.chr ,'.fas', collapse = '')
 query.file = 'A1.polished_contigs_scaffolded_softmasked_TAIR10.v1.1.fasta'
+pref.blsat.res = paste0('A1', '_', query.chr, '_parts_', collapse = '')
+
+query.file = '9728.polished_contigs_scaffolded_softmasked_TAIR10.v1.1.fasta'
+pref.blsat.res = paste0('9728', '_', query.chr, '_parts_', collapse = '')
 
 base.fas.fw = read.fasta(paste(path.base, base.file, sep = ''))
 query.fas = read.fasta(paste(path.query, query.file, sep = ''))
 
+
 base.fas.fw = base.fas.fw[[1]]
-
-# base.chr.len = sapply(base.fas.fw, function(x) length(x))
-# query.chr.len = sapply(query.fas, function(x) length(x))
-
-# base.fas.fw = base.fas.fw[base.chr.len == max(base.chr.len)][[1]]
-# query.fas = query.fas[query.chr.len == max(query.chr.len)][[1]]
-
-# base.chr.name = names(base.chr.len)[base.chr.len == max(base.chr.len)]
-
 base.fas.bw = reverseComplement(base.fas.fw)
+
+query.fas.chr = query.fas[[query.chr]]
+
+blast.res.file <- paste0(pref.blsat.res, as.character(base.chr), '.txt', collapse = '');
 
 ```
 
@@ -47,12 +54,10 @@ base.fas.bw = reverseComplement(base.fas.fw)
 # Read blast results
 ```{r}
 
-query.chr = 1
-blast.res.file <- paste0('A1_1_parts_', as.character(query.chr), '.txt', collapse = '');
 
 t = read.table(paste(path.blast.res, blast.res.file, sep = ''), stringsAsFactors = F, header = F)
 
-query.fas.chr = query.fas[[query.chr]]
+
 
 # Remove duplicates
 # t = t[!duplicated(t[,'V1']),]
@@ -102,36 +107,6 @@ showt(t)
 
 
 
-
-# Start
-```{r}
-# t = read.table('/Volumes/Samsung_T5/vienn/tmp/tmp4.txt', stringsAsFactors = F)
-# plot(t[,'V4'], t[,'V2'])
-# # orderliness
-# 
-# idx = abs(t[,'V2'] - t[,'V4']) < 10^6
-# t <- t[idx,]
-# rownames(t) <- NULL
-# 
-# rownames(t) <- NULL
-# 
-# # remove outliers - single
-# for(i in 1:2) {
-#   a1 = t[1:(nrow(t)-2),'V4']
-#   a2 = t[2:(nrow(t)-1),'V4']
-#   a3 = t[3:(nrow(t)),'V4']
-#   
-#   bidx = c(F, abs(a3-a1) < abs((a2*2 - a1 - a3))/2, F);
-#   idx = 1:nrow(t);
-#   idx[bidx]
-#   t <- t[-idx[bidx],];
-#   rownames(t) <- NULL
-# }
-# 
-# plot(t[,'V4'], t[,'V2'])
-# 
-# 
-```
 
 
 # First glue
@@ -221,6 +196,10 @@ for(threshold in thresholds) {
     
     # If new fragment is in irow fragment by query
     idx.inside = (t[,'V2'] >= t[irow,'V2']) & (t[,'V3'] <= t[irow,'V3'])
+    idx[idx.inside] = 10^10
+    
+    # If new fragment is in irow fragment by base
+    idx.inside = (t[,'V4'] >= t[irow,'V4']) & (t[,'V5'] <= t[irow,'V5'])
     idx[idx.inside] = 10^10
     
     idx[t$dir != t$dir[irow]] = 10^10
@@ -345,7 +324,6 @@ plot(t[, 'V4'],t[, 'V2'])
 hist(log(t[,'V7'], base = 10), 100)
 
 rownames(t) <- NULL
-
 
 ```
 
