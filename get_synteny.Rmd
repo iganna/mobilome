@@ -3,9 +3,160 @@ title: "R Notebook"
 output: html_notebook
 ---
 
-This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+# Function
+```{r}
 
-Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Cmd+Shift+Enter*. 
+pw.aln <- function(t, thresholds, file.log = NULL, gap.open = 20, maxval = 10^10) {
+  
+  if(!is.null(file.log)) {
+    write('', file=file.log, append=F)
+  }
+  for(threshold in thresholds) {
+  
+    irow = 1
+    while(irow < nrow(t)) {
+      # print(threshold)
+      # print(irow)
+      
+      # if a base fragment of irow is already within some base fragment
+      idx = (t[,'V4'] <= t[irow,'V4']) & (t[,'V5'] >= t[irow,'V5'])
+      idx[irow] = F
+      if(sum(idx) > 0){
+        irow <- irow + 1
+        next
+      }
+      
+      # if a query fragment of irow is already within some query fragment
+      idx = (t[,'V2'] <= t[irow,'V2']) & (t[,'V3'] >= t[irow,'V3'])
+      idx[irow] = F
+      if(sum(idx) > 0){
+        irow <- irow + 1
+        next
+      }
+      
+      
+      idx = abs(t[,'V2'] - (t[irow,'V3']))
+      # idx = apply(cbind(abs(t[,'V2'] - (t[irow,'V3'])), abs(t[,'V4'] - (t[irow,'V5']))), 1, min)
+      idx[irow] = maxval
+      idx[t[,'V2'] <= t[irow,'V2']] = maxval
+      idx[t[,'V4'] <= t[irow,'V4']] = maxval
+      
+      # If new fragment is in irow fragment by query
+      idx.inside = (t[,'V2'] >= t[irow,'V2']) & (t[,'V3'] <= t[irow,'V3'])
+      idx[idx.inside] = maxval
+      
+      # If new fragment is in irow fragment by base
+      idx.inside = (t[,'V4'] >= t[irow,'V4']) & (t[,'V5'] <= t[irow,'V5'])
+      idx[idx.inside] = maxval
+      
+      idx[t$dir != t$dir[irow]] = maxval
+      
+      idx[abs(t[, 'V2'] - t[irow, 'V3']) > threshold] = maxval
+      idx[abs(t[, 'V4'] - t[irow, 'V5']) > threshold] = maxval
+      
+      if(min(idx) == maxval){
+        irow <- irow + 1
+        next
+      }
+      
+      idx = which(idx == min(idx))
+  
+      if(length(idx) == 0) {
+        irow <- irow + 1
+        next
+      }
+      idx = idx[1]
+      
+      if(threshold > 10^4){
+        n.char = 50
+        n.char.thresh = 100  
+      } else {
+        n.char = 9
+        n.char.thresh = 50
+      }
+      
+      
+      d.tmp = 0
+      while (d.tmp < n.char.thresh) {
+        n.char = n.char + 1
+        pos.query.start = max(1, t[irow, 'V3'] - n.char + sumGapLastN(t[irow, 'V8'], n.char))
+        pos.query.end = t[idx, 'V2'] + n.char - sumGapFirstN(t[idx, 'V8'], n.char)
+        
+        
+        pos.base.start = max(1, t[irow, 'V5'] - n.char + sumGapLastN(t[irow, 'V9'], n.char))
+        pos.base.end = t[idx, 'V4'] + n.char - sumGapFirstN(t[idx, 'V9'], n.char)
+        
+        d.tmp = min(pos.query.end - pos.query.start, pos.base.end - pos.base.start)
+      }
+      
+      if(t$dir[irow] == 0){
+        base.fas = base.fas.fw
+      } else {
+        base.fas = base.fas.bw
+      }
+      
+      seq.query <- toupper(query.fas.chr[(pos.query.start+1):(pos.query.end-1)])
+      seq.base <- toupper(base.fas[(pos.base.start+1):(pos.base.end-1)])  
+      
+      globalAlign<- pairwiseAlignment(paste0(seq.query, collapse=''), 
+                                      paste0(seq.base, collapse=''), gapOpening = gap.open, type="global")
+      globalAlign 
+      
+      if(!is.null(file.log)) {
+        write(paste((pos.query.start+1), (pos.query.end-1), as.character(alignedPattern(globalAlign))),
+              file=file.log, append=TRUE)
+        write(paste((pos.base.start+1), (pos.base.end-1), as.character(alignedSubject(globalAlign))), 
+              file=file.log, append=TRUE)
+        write('\n', file=file.log, append=TRUE)
+      }
+      
+      
+      seq.query.new = paste(removeLastN(t[irow, 'V8'], n.char),  
+                            alignedPattern(globalAlign), 
+                            removeFirstN(t[idx, 'V8'], n.char), sep = '')
+      
+      seq.base.new = paste(removeLastN(t[irow, 'V9'], n.char),  
+                           alignedSubject(globalAlign), 
+                           removeFirstN(t[idx, 'V9'], n.char), sep = '')
+      
+      if(nchar(seq.query.new) != nchar(seq.base.new)) stop('aa')
+      
+      t1 <- t
+      
+      t[irow, 'V8'] <- seq.query.new
+      t[irow, 'V9'] <- seq.base.new
+      
+      t[irow, 'V3'] <- t[idx, 'V3']
+      t[irow, 'V5'] <- t[idx, 'V5']
+      t[irow, 'V7'] <- nchar(seq.base.new)
+      
+      t <- t[-idx,]
+      
+      # s1 = seq.base.new
+      # s2 = paste0(base.fas.fw[t[irow,'V4']:t[irow,'V5']], collapse = '')
+      
+      s.base = strsplit(seq.base.new,'')[[1]]
+      idx.nogap.base = which(s.base != '-')
+      if(length(idx.nogap.base) != abs(t[irow,'V5'] - t[irow,'V4']) + 1) stop('wrong in base')
+      
+      s.query = strsplit(seq.query.new,'')[[1]]
+      idx.nogap.query = which(s.query != '-')
+      if(length(idx.nogap.query) != abs(t[irow,'V3'] - t[irow,'V2']) + 1) stop('wrong in query')
+      
+      
+      if(idx < irow) {
+        irow = irow - 1
+      }    
+      
+      rownames(t) <- NULL
+    }
+  }
+  return(t)
+}
+```
+
+
+
 
 # Setup
 ```{r, message=FALSE}
@@ -16,9 +167,17 @@ library('spgs')  # reverseComplement("actg")
 source("/Users/anna/OneDrive/pushkin/cryptic/nanopore/scripts/synteny_infer.R")
 
 path.base = '/Volumes/Samsung_T5/vienn/tair/'
-path.query = '//Volumes/Samsung_T5/vienn/pacbio/'
+path.query = '/Volumes/Samsung_T5/vienn/renamed/'
 path.blast.res <- '/Volumes/Samsung_T5/vienn/blast_res/'
+
+
+files.base = list.files(path = path.base, pattern = ".fas")
+base.pref = 'TAIR10_chr'
+
+files.query = list.files(path = path.query, pattern = ".fasta")
+query.name = gsub("*.fasta","",files.query)
 ```
+
 
 
 # Read data
@@ -27,28 +186,25 @@ path.blast.res <- '/Volumes/Samsung_T5/vienn/blast_res/'
 query.chr = 1
 base.chr = 1
 
-query.chr = 2
-base.chr = 2
+i.query = 1  # which accession to use
 
-base.file = paste0('TAIR10_chr', query.chr ,'.fas', collapse = '')
-query.file = 'A1.polished_contigs_scaffolded_softmasked_TAIR10.v1.1.fasta'
-pref.blsat.res = paste0('A1', '_', query.chr, '_parts_', collapse = '')
-
-query.file = '9728.polished_contigs_scaffolded_softmasked_TAIR10.v1.1.fasta'
-pref.blsat.res = paste0('9728', '_', query.chr, '_parts_', collapse = '')
+base.file = paste0(base.pref, query.chr ,'.fas', collapse = '')
+query.file = files.query[i.query]
+pref.blsat.res = paste0(query.name[i.query], '_', query.chr, '_', collapse = '')
 
 base.fas.fw = read.fasta(paste(path.base, base.file, sep = ''))
 query.fas = read.fasta(paste(path.query, query.file, sep = ''))
 
-
-base.fas.fw = base.fas.fw[[1]]
+base.fas.fw = base.fas.fw[[base.chr]]
 base.fas.bw = reverseComplement(base.fas.fw)
+base.len = length(base.fas.fw)
 
 query.fas.chr = query.fas[[query.chr]]
 
 blast.res.file <- paste0(pref.blsat.res, as.character(base.chr), '.txt', collapse = '');
 
 ```
+
 
 
 # Read blast results
@@ -145,6 +301,9 @@ t0 = t
 
 plot(t[,'V4'], t[,'V2'])
 
+
+plot( (base.len + 1) * t[,'dir'] + t[,'V4'] * ((-1) ^ t[,'dir']), t[,'V2'])
+
 hist(log(t[2:(nrow(t)),'V2'] - t[1:(nrow(t)-1),'V3'], base = 10), 100)
 
 sum(t[2:(nrow(t)),'V2'] - t[1:(nrow(t)-1),'V3'] < 10^3)
@@ -160,207 +319,97 @@ setdiff(which(t[2:(nrow(t)),'V2'] - t[1:(nrow(t)-1),'V3'] > 10^4),
 ```{r}
 
 file.log <- '/Users/anna/OneDrive/vienn/pacbio/log.txt'
-write('', file=file.log, append=F)
-
 thresholds = c(100, 1000, 2000)
 # thresholds = c(1000)
 
-for(threshold in thresholds) {
-
-  irow = 1
-  while(irow < nrow(t)) {
-    # print(threshold)
-    # print(irow)
-    
-    # if a base fragment of irow is already within some base fragment
-    idx = (t[,'V4'] <= t[irow,'V4']) & (t[,'V5'] >= t[irow,'V5'])
-    idx[irow] = F
-    if(sum(idx) > 0){
-      irow <- irow + 1
-      next
-    }
-    
-    # # if a query fragment of irow is already within some query fragment
-    # idx = (t[,'V2'] <= t[irow,'V2']) & (t[,'V3'] >= t[irow,'V3'])
-    # idx[irow] = F
-    # if(sum(idx) > 0){
-    #   t <- t[-irow,]
-    #   next
-    # }
-    
-    # idx = abs(t[,'V4'] - t[irow,'V5']) + abs(t[,'V2'] - (t[irow,'V3']))
-    idx = abs(t[,'V2'] - (t[irow,'V3']))
-    idx[irow] = 10^10
-    idx[t[,'V2'] <= t[irow,'V2']] = 10^10
-    idx[t[,'V4'] <= t[irow,'V4']] = 10^10
-    
-    # If new fragment is in irow fragment by query
-    idx.inside = (t[,'V2'] >= t[irow,'V2']) & (t[,'V3'] <= t[irow,'V3'])
-    idx[idx.inside] = 10^10
-    
-    # If new fragment is in irow fragment by base
-    idx.inside = (t[,'V4'] >= t[irow,'V4']) & (t[,'V5'] <= t[irow,'V5'])
-    idx[idx.inside] = 10^10
-    
-    idx[t$dir != t$dir[irow]] = 10^10
-    
-    idx = which(idx == min(idx))
-    idx = idx[1]
-    
-    # if(t[idx,'V1'] == 'part|35-1|805001|806000') spot('find')
-    
-    flag = (abs(t[idx, 'V2'] - t[irow, 'V3']) < threshold) & 
-      (abs(t[idx, 'V4'] - t[irow, 'V5']) < threshold)
-    # if(irow == 29) stop('aa')
-    
-    
-    if(!flag) {
-      irow <- irow + 1
-      next
-    }
-    
-    if(threshold == 10^4){
-      n.char = 50
-      n.char.thresh = 100  
-    } else {
-      n.char = 9
-      n.char.thresh = 50
-    }
-    
-    
-    d.tmp = 0
-    while (d.tmp < n.char.thresh) {
-      n.char = n.char + 1
-      pos.query.start = max(1, t[irow, 'V3'] - n.char + sumGapLastN(t[irow, 'V8'], n.char))
-      pos.query.end = t[idx, 'V2'] + n.char - sumGapFirstN(t[idx, 'V8'], n.char)
-      
-      
-      pos.base.start = max(1, t[irow, 'V5'] - n.char + sumGapLastN(t[irow, 'V9'], n.char))
-      pos.base.end = t[idx, 'V4'] + n.char - sumGapFirstN(t[idx, 'V9'], n.char)
-      
-      d.tmp = min(pos.query.end - pos.query.start, pos.base.end - pos.base.start)
-    }
-    
-    if(t$dir[irow] == 0){
-      base.fas = base.fas.fw
-    } else {
-      base.fas = base.fas.bw
-    }
-    
-    seq.query <- toupper(query.fas.chr[(pos.query.start+1):(pos.query.end-1)])
-    seq.base <- toupper(base.fas[(pos.base.start+1):(pos.base.end-1)])  
-    
-    globalAlign<- pairwiseAlignment(paste0(seq.query, collapse=''), 
-                                    paste0(seq.base, collapse=''), gapOpening = 20, type="global")
-    globalAlign 
-    
-    
-    write(paste((pos.query.start+1), (pos.query.end-1), as.character(alignedPattern(globalAlign))),
-          file=file.log, append=TRUE)
-    write(paste((pos.base.start+1), (pos.base.end-1), as.character(alignedSubject(globalAlign))), 
-          file=file.log, append=TRUE)
-    write('\n', file=file.log, append=TRUE)
-    
-    
-    seq.query.new = paste(removeLastN(t[irow, 'V8'], n.char),  
-                          alignedPattern(globalAlign), 
-                          removeFirstN(t[idx, 'V8'], n.char), sep = '')
-    
-    seq.base.new = paste(removeLastN(t[irow, 'V9'], n.char),  
-                         alignedSubject(globalAlign), 
-                         removeFirstN(t[idx, 'V9'], n.char), sep = '')
-    
-    if(nchar(seq.query.new) != nchar(seq.base.new)) stop('aa')
-    
-    t1 <- t
-    
-    t[irow, 'V8'] <- seq.query.new
-    t[irow, 'V9'] <- seq.base.new
-    
-    t[irow, 'V3'] <- t[idx, 'V3']
-    t[irow, 'V5'] <- t[idx, 'V5']
-    t[irow, 'V7'] <- nchar(seq.base.new)
-    
-    t <- t[-idx,]
-    
-    # s1 = seq.base.new
-    # s2 = paste0(base.fas.fw[t[irow,'V4']:t[irow,'V5']], collapse = '')
-    
-    s.base = strsplit(seq.base.new,'')[[1]]
-    idx.nogap.base = which(s.base != '-')
-    if(length(idx.nogap.base) != abs(t[irow,'V5'] - t[irow,'V4']) + 1) stop('wrong in base')
-    
-    s.query = strsplit(seq.query.new,'')[[1]]
-    idx.nogap.query = which(s.query != '-')
-    if(length(idx.nogap.query) != abs(t[irow,'V3'] - t[irow,'V2']) + 1) stop('wrong in query')
-    
-    
-    if(idx < irow) {
-      irow = irow - 1
-    }    
-    
-    rownames(t) <- NULL
-  }
-}
-
-showt(t, c(irow, idx))
+t = pw.aln(t, thresholds, file.log)
+showt(t)
 
 t1 = t
-```
 
-
-## Remove outliers
-```{r}
-
-plot(t[, 'V4'],t[, 'V2'])
-
-fragment.len.cutoff = 2000
-plot(t[t[,'V7'] <= fragment.len.cutoff, 'V4'], 
-     t[t[,'V7'] <= fragment.len.cutoff, 'V2'])
-
-t = t[t[,'V7'] > fragment.len.cutoff,]
-plot(t[, 'V4'],t[, 'V2'])
-
-hist(log(t[,'V7'], base = 10), 100)
-
-rownames(t) <- NULL
 
 ```
 
-
-# if something is inside something in query - remove it
+# Remove complete overlap from both sides (base an query)
 ```{r}
-irow = 1
+t.base = t
 
-while(irow < nrow(t)) {
-
-  # index of all, that overlap with the current one (irow) in the right side
-  idx = setdiff(which((t[,'V2'] >= t[irow,'V2']) & (t[,'V3'] <= t[irow,'V3'])), irow)
-  if(length(idx) > 0) {
-    stop('a')
-   t = t[-idx,] 
-   irow = irow - sum(idx < irow)
-  }
+for(irow in 1:nrow(t.base)) {
+  if(t.base[irow, 'dir'] == 1) {
     
-  # # index of all, that overlap with the current one (irow) in the right side
-  # idx = setdiff(which((t[,'V2'] >= t[irow,'V2']) & (t[,'V2'] <= t[irow,'V3'])), irow)
-  # if(length(idx) > 0) {
-  #   stop('a')
-  #  t = t[-idx,] 
-  #  irow = irow - sum(idx < irow)
-  # }
-  
-  # # index of all, that overlap with the current one (irow) in the left side
-  # idx = setdiff(which((t[,'V3'] >= t[irow,'V2']) & (t[,'V3'] <= t[irow,'V3'])), irow)
-  # if(length(idx) > 0) {
-  #   stop('b')
-  #   t = t[-idx,] 
-  #   irow = irow - sum(idx < irow)
-  # }
-  irow = irow + 1
+    b1 <- t.base[irow,'V4']
+    b2 <- t.base[irow,'V5']
+    
+    t.base[irow,'V4'] <- base.len - b1 + 1
+    t.base[irow,'V5'] <- base.len - b2 + 1
+  } 
+}
+t.base = t.base[order(t.base['V2']),]
+showt(t.base)
+
+# ------------------------------
+# Overlap in base
+irow = 1
+while(irow < nrow(t.base)) {
+  # index of all, that overlap with the current one (irow) in the right side
+  idx = which((t.base[,'V4'] <= t.base[irow,'V4']) & 
+                (t.base[,'V5'] >= t.base[irow,'V5']))
+  if(length(idx) > 1) {
+    t.base = t.base[-irow,] 
+  } else {
+    irow = irow + 1
+  }
 }
 
-showt(t, c(irow, idx))
+# Overlap in query
+irow = 1
+while(irow < nrow(t.base)) {
+  # index of all, that overlap with the current one (irow) in the right side
+  idx = which((t.base[,'V2'] <= t.base[irow,'V2']) & 
+                (t.base[,'V3'] >= t.base[irow,'V3']))
+  if(length(idx) > 1) {
+    t.base = t.base[-irow,] 
+  } else {
+    irow = irow + 1
+  }
+}
+
+showt(t.base)
+
+ids.remove = which((t.base[, 'dir'] > 0) & (t.base[, 'V7'] < 5000))
+if(length(ids.remove) > 0) {
+  t.base = t.base[-ids.remove,]
+}
+
+
+idx = rep(F, base.len)
+for(irow in 1:nrow(t.base)){
+  idx[t.base[irow,'V4']:t.base[irow,'V5']] = T
+}
+
+coverage = sum(idx) / base.len
+print(coverage)
+
+
+idx = rep(F, length(query.fas.chr))
+for(irow in 1:nrow(t.base)){
+  idx[t.base[irow,'V2']:t.base[irow,'V3']] = T
+}
+
+coverage = sum(idx) / length(idx)
+print(coverage)
+
+# remove distant outliers
+
+
+plot(t.base[,'V4'], t.base[,'V2'])
+
+t = t[rownames(t.base),]
+```
+
+
+```{r}
+t = pw.aln(t, c(3000, 4000))
 
 ```
 
@@ -369,17 +418,17 @@ showt(t, c(irow, idx))
 df = c()
 for(i in 1:nrow(t)) {
   if(t$dir[i] == 0){
-    df = rbind(df, c(t[i, 'V2'], t[i, 'V4'], i))
-    df = rbind(df, c(t[i, 'V3'], t[i, 'V5'], i))
+    df = rbind(df, c(t[i, 'V2'], t[i, 'V4'], i, 0))
+    df = rbind(df, c(t[i, 'V3'], t[i, 'V5'], i, 0))
   } else {
-    df = rbind(df, c(t[i, 'V2'], length(base.fas.fw) - t[i, 'V4'] + 1, i))
-    df = rbind(df, c(t[i, 'V3'], length(base.fas.fw) - t[i, 'V5'] + 1, i))
+    df = rbind(df, c(t[i, 'V2'], length(base.fas.fw) - t[i, 'V4'] + 1, i, 1))
+    df = rbind(df, c(t[i, 'V3'], length(base.fas.fw) - t[i, 'V5'] + 1, i, 1))
   }
     
 }
 
 df = as.data.frame(df)
-df$V4 <- df$V3 %% 2;
+df$clr <- df$V3 %% 2;
 p <- ggplot(df, aes(x = V1, y=V2, color = as.factor(V4), group=as.factor(V3)  )) + 
   geom_line(show.legend = FALSE) + theme_bw()
 p
@@ -387,13 +436,71 @@ p
 ```
 
 
-# Get something to glue
+
+# Get total alignment
 ```{r}
-t <- t[order(t[,'V']),]
+t.base = t
+for(irow in 1:nrow(t.base)) {
+  if(t.base[irow, 'dir'] == 1) {
+    
+    b1 <- t.base[irow,'V4']
+    b2 <- t.base[irow,'V5']
+    
+    t.base[irow,'V4'] <- base.len - b2 + 1
+    t.base[irow,'V5'] <- base.len - b1 + 1
+    
+    q1 <- t.base[irow,'V2']
+    q2 <- t.base[irow,'V3']
+
+    t.base[irow,'V2'] <- -q2
+    t.base[irow,'V3'] <- -q1
+    
+    t.base[irow, 'V8'] <- reverseComplement(t.base[irow, 'V8'])
+    t.base[irow, 'V9'] <- reverseComplement(t.base[irow, 'V9'])
+  } 
+}
+
+aln.pos = rep(0, base.len)
+aln.nt = rep('-', base.len)
+
+for(irow in 1:nrow(t)) {
+  s.q = strsplit(t[irow, 'V8'], '')[[1]]
+  s.b = strsplit(t[irow, 'V9'], '')[[1]]
+  
+  print(sum(s.q != s.b))
+  
+  pos.q = rep(0, t[irow, 'V7'])
+  pos.q[s.q != '-'] <- t[irow, 'V2']:t[irow, 'V3']
+  pos.b = t[irow, 'V4']:t[irow, 'V5']
+  
+  idx.b = which(s.b == '-')
+  if(length(idx.b) > 0) {
+    pos.q = pos.q[-idx.b]
+    s.q = s.q[-idx.b]  
+  }
+  
+  
+  # if(sum(aln.nt != '-') == 0) {
+    aln.pos[pos.b] = pos.q
+    aln.nt[pos.b] = s.q
+  # } else {
+  #   stop('ss')
+  # }
+}
+```
+
+# Get SNPs
+```{r}
+possible.snp.pos = which((aln.nt != '-') & (aln.nt != toupper(base.fas.fw)))
+
+flanking.match = 5
+idx = (snp.pos[-1] - snp.pos[-length(snp.pos)]) > 5
+idx = c(idx, T) & c(T, idx)
+snp.pos = possible.snp.pos[idx]
+
 
 
 ```
-
 
 
 
@@ -423,42 +530,16 @@ for(irow in 1:nrow(t)) {
       f = 'query'
       s <- c(s, s.query[icol])
     } else if (length(s) > 0) {
-      # stop('aa')
-      # if (length(s) == 7) {
-      #   stop('aa')
-      # }
       mobilome <- c(mobilome, paste0(s, collapse =''))
       s <- c()
       f = ''
-      
-
-      
     }
-    
-
   }
-
 }
 
 
 ```
 
-
-```{r}
-df = c()
-for(i in 1:nrow(t)) {
-  df = rbind(df, c(t[i, 'V2'], t[i, 'V3'], i))
-  df = rbind(df, c(t[i, 'V4'], t[i, 'V5'], i))
-}
-
-
-df = as.data.frame(df)
-library(ggplot2)
-ggplot(df, aes(x = V1, y=V2, color = as.factor(V3)  )) + geom_line(show.legend = FALSE) 
-
-
-
-```
 
 
 
@@ -471,13 +552,12 @@ mobilome.t = mobilome.t[order(mobilome.unique.len)]
 mobilome.unique.len <- sapply(names(mobilome.t), nchar)
 
 
-mobilome.t[]
 
 plot(log(mobilome.t, base = 2))
 
 
 
-idx <- (mobilome.t > 2^2) & (mobilome.t < 2^6) & 
+idx <- (mobilome.t > 2^2) & (mobilome.t < 2^6) &
   (rank(mobilome.unique.len) > length(mobilome.t)/3)
 
 mobilome.t[idx]
@@ -488,12 +568,12 @@ mobilome.t[(mobilome.unique.len>15) & (mobilome.unique.len<100)]
 
 for(len in 15:50){
   mobilome.prev = names(mobilome.t[mobilome.unique.len == (len-1)])
-  
+
   tmp = mobilome.t[mobilome.unique.len == (len-1)]
   tmp[tmp >1]
-  
+
   mobilome.prev = names(tmp[tmp >1])
-  
+
   scores = c()
   for(i in 1:length(mobilome.prev)) {
     for(j in i:length(mobilome.prev)) {
@@ -510,34 +590,34 @@ for(len in 15:50){
 
 
 
-```{r}
-nts <- c('A', 'C', 'G', 'T')
-cnt <- mobilome.t[nts]
-freq <- cnt / sum(cnt)
+<!-- ```{r} -->
+<!-- nts <- c('A', 'C', 'G', 'T') -->
+<!-- cnt <- mobilome.t[nts] -->
+<!-- freq <- cnt / sum(cnt) -->
 
-cmb <- gtools::permutations(4, 7, repeats.allowed=TRUE)
-nts.cmb <- sapply(1:nrow(cmb), function(i) paste0(nts[cmb[i,]], collapse = ''))
+<!-- cmb <- gtools::permutations(4, 7, repeats.allowed=TRUE) -->
+<!-- nts.cmb <- sapply(1:nrow(cmb), function(i) paste0(nts[cmb[i,]], collapse = '')) -->
 
-cnt.cmb <- mobilome.t[nts.cmb]
+<!-- cnt.cmb <- mobilome.t[nts.cmb] -->
 
-freq.cmb <- sapply(1:nrow(cmb), function(i) prod(freq[cmb[i,]]))
+<!-- freq.cmb <- sapply(1:nrow(cmb), function(i) prod(freq[cmb[i,]])) -->
 
-plot(freq.cmb, cnt.cmb)
+<!-- plot(freq.cmb, cnt.cmb) -->
 
-text(freq.cmb, cnt.cmb, nts.cmb, cex=0.5, pos=3,col="red", adj = c(0,1))
+<!-- text(freq.cmb, cnt.cmb, nts.cmb, cex=0.5, pos=3,col="red", adj = c(0,1)) -->
 
-```
+<!-- ``` -->
 
 
-```{r}
-d<-head(mtcars)
-plot(d[,'wt'], d[,'mpg'], 
-     main="Milage vs. Car Weight\n~~~~~~~~~~~~~~~~~~~",
-      xlab="Weight", ylab="Miles/(US) gallon",
-      pch=19, col="darkgreen")
-text(d[,'wt'], d[,'mpg'],  row.names(d),
-     cex=0.65, pos=3,col="red") 
-```
+<!-- ```{r} -->
+<!-- d<-head(mtcars) -->
+<!-- plot(d[,'wt'], d[,'mpg'],  -->
+<!--      main="Milage vs. Car Weight\n~~~~~~~~~~~~~~~~~~~", -->
+<!--       xlab="Weight", ylab="Miles/(US) gallon", -->
+<!--       pch=19, col="darkgreen") -->
+<!-- text(d[,'wt'], d[,'mpg'],  row.names(d), -->
+<!--      cex=0.65, pos=3,col="red")  -->
+<!-- ``` -->
 
 
 <!-- ```{r} -->
