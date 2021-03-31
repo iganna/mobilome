@@ -3,158 +3,6 @@ title: "R Notebook"
 output: html_notebook
 ---
 
-# Function
-```{r}
-
-pw.aln <- function(t, thresholds, file.log = NULL, gap.open = 20, maxval = 10^10) {
-  
-  if(!is.null(file.log)) {
-    write('', file=file.log, append=F)
-  }
-  for(threshold in thresholds) {
-  
-    irow = 1
-    while(irow < nrow(t)) {
-      # print(threshold)
-      # print(irow)
-      
-      # if a base fragment of irow is already within some base fragment
-      idx = (t[,'V4'] <= t[irow,'V4']) & (t[,'V5'] >= t[irow,'V5'])
-      idx[irow] = F
-      if(sum(idx) > 0){
-        irow <- irow + 1
-        next
-      }
-      
-      # if a query fragment of irow is already within some query fragment
-      idx = (t[,'V2'] <= t[irow,'V2']) & (t[,'V3'] >= t[irow,'V3'])
-      idx[irow] = F
-      if(sum(idx) > 0){
-        irow <- irow + 1
-        next
-      }
-      
-      
-      idx = abs(t[,'V2'] - (t[irow,'V3']))
-      # idx = apply(cbind(abs(t[,'V2'] - (t[irow,'V3'])), abs(t[,'V4'] - (t[irow,'V5']))), 1, min)
-      idx[irow] = maxval
-      idx[t[,'V2'] <= t[irow,'V2']] = maxval
-      idx[t[,'V4'] <= t[irow,'V4']] = maxval
-      
-      # If new fragment is in irow fragment by query
-      idx.inside = (t[,'V2'] >= t[irow,'V2']) & (t[,'V3'] <= t[irow,'V3'])
-      idx[idx.inside] = maxval
-      
-      # If new fragment is in irow fragment by base
-      idx.inside = (t[,'V4'] >= t[irow,'V4']) & (t[,'V5'] <= t[irow,'V5'])
-      idx[idx.inside] = maxval
-      
-      idx[t$dir != t$dir[irow]] = maxval
-      
-      idx[abs(t[, 'V2'] - t[irow, 'V3']) > threshold] = maxval
-      idx[abs(t[, 'V4'] - t[irow, 'V5']) > threshold] = maxval
-      
-      if(min(idx) == maxval){
-        irow <- irow + 1
-        next
-      }
-      
-      idx = which(idx == min(idx))
-  
-      if(length(idx) == 0) {
-        irow <- irow + 1
-        next
-      }
-      idx = idx[1]
-      
-      if(threshold > 10^4){
-        n.char = 50
-        n.char.thresh = 100  
-      } else {
-        n.char = 9
-        n.char.thresh = 50
-      }
-      
-      
-      d.tmp = 0
-      while (d.tmp < n.char.thresh) {
-        n.char = n.char + 1
-        pos.query.start = max(1, t[irow, 'V3'] - n.char + sumGapLastN(t[irow, 'V8'], n.char))
-        pos.query.end = t[idx, 'V2'] + n.char - sumGapFirstN(t[idx, 'V8'], n.char)
-        
-        
-        pos.base.start = max(1, t[irow, 'V5'] - n.char + sumGapLastN(t[irow, 'V9'], n.char))
-        pos.base.end = t[idx, 'V4'] + n.char - sumGapFirstN(t[idx, 'V9'], n.char)
-        
-        d.tmp = min(pos.query.end - pos.query.start, pos.base.end - pos.base.start)
-      }
-      
-      if(t$dir[irow] == 0){
-        base.fas = base.fas.fw
-      } else {
-        base.fas = base.fas.bw
-      }
-      
-      seq.query <- toupper(query.fas.chr[(pos.query.start+1):(pos.query.end-1)])
-      seq.base <- toupper(base.fas[(pos.base.start+1):(pos.base.end-1)])  
-      
-      globalAlign<- pairwiseAlignment(paste0(seq.query, collapse=''), 
-                                      paste0(seq.base, collapse=''), gapOpening = gap.open, type="global")
-      globalAlign 
-      
-      if(!is.null(file.log)) {
-        write(paste((pos.query.start+1), (pos.query.end-1), as.character(alignedPattern(globalAlign))),
-              file=file.log, append=TRUE)
-        write(paste((pos.base.start+1), (pos.base.end-1), as.character(alignedSubject(globalAlign))), 
-              file=file.log, append=TRUE)
-        write('\n', file=file.log, append=TRUE)
-      }
-      
-      
-      seq.query.new = paste(removeLastN(t[irow, 'V8'], n.char),  
-                            alignedPattern(globalAlign), 
-                            removeFirstN(t[idx, 'V8'], n.char), sep = '')
-      
-      seq.base.new = paste(removeLastN(t[irow, 'V9'], n.char),  
-                           alignedSubject(globalAlign), 
-                           removeFirstN(t[idx, 'V9'], n.char), sep = '')
-      
-      if(nchar(seq.query.new) != nchar(seq.base.new)) stop('aa')
-      
-      t1 <- t
-      
-      t[irow, 'V8'] <- seq.query.new
-      t[irow, 'V9'] <- seq.base.new
-      
-      t[irow, 'V3'] <- t[idx, 'V3']
-      t[irow, 'V5'] <- t[idx, 'V5']
-      t[irow, 'V7'] <- nchar(seq.base.new)
-      
-      t <- t[-idx,]
-      
-      # s1 = seq.base.new
-      # s2 = paste0(base.fas.fw[t[irow,'V4']:t[irow,'V5']], collapse = '')
-      
-      s.base = strsplit(seq.base.new,'')[[1]]
-      idx.nogap.base = which(s.base != '-')
-      if(length(idx.nogap.base) != abs(t[irow,'V5'] - t[irow,'V4']) + 1) stop('wrong in base')
-      
-      s.query = strsplit(seq.query.new,'')[[1]]
-      idx.nogap.query = which(s.query != '-')
-      if(length(idx.nogap.query) != abs(t[irow,'V3'] - t[irow,'V2']) + 1) stop('wrong in query')
-      
-      
-      if(idx < irow) {
-        irow = irow - 1
-      }    
-      
-      rownames(t) <- NULL
-    }
-  }
-  return(t)
-}
-```
-
 
 
 
@@ -169,6 +17,7 @@ source("/Users/anna/OneDrive/pushkin/cryptic/nanopore/scripts/synteny_infer.R")
 path.base = '/Volumes/Samsung_T5/vienn/tair/'
 path.query = '/Volumes/Samsung_T5/vienn/renamed/'
 path.blast.res <- '/Volumes/Samsung_T5/vienn/blast_res/'
+path.t <- '/Volumes/Samsung_T5/vienn/alignments/'
 
 
 files.base = list.files(path = path.base, pattern = ".fas")
@@ -183,10 +32,12 @@ query.name = gsub("*.fasta","",files.query)
 # Read data
 ```{r}
 
-query.chr = 1
-base.chr = 1
+query.chr = 5
+base.chr = 5
+
 
 i.query = 1  # which accession to use
+i.query = which(query.name == '10012')
 
 base.file = paste0(base.pref, query.chr ,'.fas', collapse = '')
 query.file = files.query[i.query]
@@ -195,7 +46,7 @@ pref.blsat.res = paste0(query.name[i.query], '_', query.chr, '_', collapse = '')
 base.fas.fw = read.fasta(paste(path.base, base.file, sep = ''))
 query.fas = read.fasta(paste(path.query, query.file, sep = ''))
 
-base.fas.fw = base.fas.fw[[base.chr]]
+base.fas.fw = base.fas.fw[[1]] # do not remove this 1, file contains only one sequence
 base.fas.bw = reverseComplement(base.fas.fw)
 base.len = length(base.fas.fw)
 
@@ -299,7 +150,7 @@ t0 = t
 ## Distribution of gaps
 ```{r}
 
-plot(t[,'V4'], t[,'V2'])
+# plot(t[,'V4'], t[,'V2'])
 
 
 plot( (base.len + 1) * t[,'dir'] + t[,'V4'] * ((-1) ^ t[,'dir']), t[,'V2'])
@@ -322,7 +173,9 @@ file.log <- '/Users/anna/OneDrive/vienn/pacbio/log.txt'
 thresholds = c(100, 1000, 2000)
 # thresholds = c(1000)
 
-t = pw.aln(t, thresholds, file.log)
+t = glueByThreshold(t, thresholds, query.fas = query.fas.chr, 
+                     base.fas.fw = base.fas.fw, 
+                     base.fas.bw = base.fas.bw, file.log=file.log)
 showt(t)
 
 t1 = t
@@ -407,9 +260,12 @@ plot(t.base[,'V4'], t.base[,'V2'])
 t = t[rownames(t.base),]
 ```
 
-
+## Additional glue
 ```{r}
-t = pw.aln(t, c(3000, 4000))
+
+t = glueByThreshold(t, c(3000, 4000), query.fas = query.fas.chr, 
+                     base.fas.fw = base.fas.fw, 
+                     base.fas.bw = base.fas.bw, file.log=file.log)
 
 ```
 
@@ -434,6 +290,19 @@ p <- ggplot(df, aes(x = V1, y=V2, color = as.factor(V4), group=as.factor(V3)  ))
 p
 
 ```
+
+## Save
+```{r}
+
+saveRDS(object = t, file = paste(path.t, 
+                                 paste0(pref.blsat.res, as.character(base.chr), 
+                                        '.rds', collapse = ''), sep = ''))
+
+
+# t1 = readRDS(file = paste(path.t, blast.res.file, sep = ''))
+
+```
+
 
 
 
@@ -491,17 +360,16 @@ for(irow in 1:nrow(t)) {
 
 # Get SNPs
 ```{r}
-possible.snp.pos = which((aln.nt != '-') & (aln.nt != toupper(base.fas.fw)))
+snp.pos = which((aln.nt != '-') & (aln.nt != toupper(base.fas.fw)))
 
-flanking.match = 5
-idx = (snp.pos[-1] - snp.pos[-length(snp.pos)]) > 5
+
+flanking.match = 3
+idx = (snp.pos[-1] - snp.pos[-length(snp.pos)]) > flanking.match
 idx = c(idx, T) & c(T, idx)
-snp.pos = possible.snp.pos[idx]
-
+snp.pos = snp.pos[idx]
 
 
 ```
-
 
 
 # Mobilome
@@ -537,9 +405,7 @@ for(irow in 1:nrow(t)) {
   }
 }
 
-
 ```
-
 
 
 
@@ -554,7 +420,6 @@ mobilome.unique.len <- sapply(names(mobilome.t), nchar)
 
 
 plot(log(mobilome.t, base = 2))
-
 
 
 idx <- (mobilome.t > 2^2) & (mobilome.t < 2^6) &
