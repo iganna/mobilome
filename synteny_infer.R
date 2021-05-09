@@ -82,7 +82,7 @@ showt <- function(t, irow=NULL){
 }
 
 glueByThreshold <- function(t, thresholds, base.fas.fw, base.fas.bw, query.fas,
-                            file.log = NULL, gap.open = 20, maxval = 10^10) {
+                            file.log = NULL, gap.open = 30, gap.ext = 0.5, maxval = 10^10) {
   
   if(!is.null(file.log)) {
     write('', file=file.log, append=F)
@@ -96,16 +96,18 @@ glueByThreshold <- function(t, thresholds, base.fas.fw, base.fas.bw, query.fas,
       
       # if a base fragment of irow is already within some base fragment
       idx = (t[,'V4'] <= t[irow,'V4']) & (t[,'V5'] >= t[irow,'V5'])
+      idx[t$dir != t$dir[irow]] = F
       idx[irow] = F
-      if(sum(idx) > 0){
+      if (sum(idx) > 0) {
         irow <- irow + 1
         next
       }
       
       # if a query fragment of irow is already within some query fragment
       idx = (t[,'V2'] <= t[irow,'V2']) & (t[,'V3'] >= t[irow,'V3'])
+      idx[t$dir != t$dir[irow]] = F
       idx[irow] = F
-      if(sum(idx) > 0){
+      if (sum(idx) > 0) {
         irow <- irow + 1
         next
       }
@@ -125,19 +127,19 @@ glueByThreshold <- function(t, thresholds, base.fas.fw, base.fas.bw, query.fas,
       idx.inside = (t[,'V4'] >= t[irow,'V4']) & (t[,'V5'] <= t[irow,'V5'])
       idx[idx.inside] = maxval
       
-      idx[t$dir != t$dir[irow]] = maxval
+      idx[t$dir != t$dir[irow]] <- maxval
       
       idx[abs(t[, 'V2'] - t[irow, 'V3']) > threshold] = maxval
       idx[abs(t[, 'V4'] - t[irow, 'V5']) > threshold] = maxval
       
-      if(min(idx) == maxval){
+      if (min(idx) == maxval) {
         irow <- irow + 1
         next
       }
       
       idx = which(idx == min(idx))
       
-      if(length(idx) == 0) {
+      if (length(idx) == 0) {
         irow <- irow + 1
         next
       }
@@ -176,7 +178,9 @@ glueByThreshold <- function(t, thresholds, base.fas.fw, base.fas.bw, query.fas,
       seq.base <- toupper(base.fas[(pos.base.start+1):(pos.base.end-1)])  
       
       globalAlign<- pairwiseAlignment(paste0(seq.query, collapse=''), 
-                                      paste0(seq.base, collapse=''), gapOpening = gap.open, type="global")
+                                      paste0(seq.base, collapse=''), gapOpening = gap.open, 
+                                      gapExtension=gap.ext,
+                                      type="global")
       globalAlign 
       
       if(!is.null(file.log)) {
@@ -383,11 +387,15 @@ removeShortOverlaps <- function(t, echo=F){
   return(t)
 }
 
-additionalLocalAlignments <- function(t, query.fas.chr, base.fas.fw, base.fas.bw, echo=F, n.short=200){
+additionalLocalAlignments <- function(t, query.fas.chr, base.fas.fw, base.fas.bw, echo=F, 
+                                      n.short=200, gap.max = 15000, gap.open = 30, gap.ext = 0.5, 
+                                      file.log = NULL){
+  if(!is.null(file.log)) {
+    write('', file=file.log, append=F)
+  }
+  
   t <- t[order(t[,'V2']),]
-  gap.open = 20
   t.additional <- c()
-  gap.max <- 15000
   irow = 0
   while(irow < (nrow(t) - 2)) {
     irow = irow+1
@@ -409,11 +417,24 @@ additionalLocalAlignments <- function(t, query.fas.chr, base.fas.fw, base.fas.bw
     } else {
       s.b = base.fas.bw[(t[irow,'V5']+1): (t[irow + 1,'V4']-1)]
     }
+    
     s.q <- paste0(s.q, collapse='')
     s.b <- paste0(s.b, collapse='')
     
     localAlign <- pairwiseAlignment(s.q, s.b, 
-                                    gapOpening = 10, type="local")
+                                    gapOpening = gap.open, gapExtension=gap.ext,
+                                    type="local")
+    
+    if(!is.null(file.log)) {
+      write(paste((t[irow,'V3']+1), (t[irow,'V5']+1), as.character(alignedPattern(localAlign))),
+            file=file.log, append=TRUE)
+      write(paste((t[irow,'V3']+1), (t[irow,'V5']+1), as.character(alignedSubject(localAlign))), 
+            file=file.log, append=TRUE)
+      write('\n', file=file.log, append=TRUE)
+    }
+    
+    # localAlign <- pairwiseAlignment(s.q, s.b, type="global")
+    
     s.q.range <- localAlign@pattern@range
     s.b.range <- localAlign@subject@range
     
@@ -456,8 +477,8 @@ removeCompleteOverlaps <- function(t, n.distant = 1000000, n.short = 200){
       b1 <- t.base[irow,'V4']
       b2 <- t.base[irow,'V5']
       
-      t.base[irow,'V4'] <- base.len - b1 + 1
-      t.base[irow,'V5'] <- base.len - b2 + 1
+      t.base[irow,'V5'] <- base.len - b1 + 1
+      t.base[irow,'V4'] <- base.len - b2 + 1
     } 
   }
   t.base = t.base[order(t.base['V2']),]
@@ -505,14 +526,14 @@ removeCompleteOverlaps <- function(t, n.distant = 1000000, n.short = 200){
   # coverage = sum(idx) / length(idx)
   # print(coverage)
   
-  # # remove distant outliers
-  # idx.distant <- c()
-  # for(irow in 1:nrow(t.base)){
-  #   if(abs(t.base[irow,'V2'] - t.base[irow,'V4']) > n.distant){
-  #     idx.distant <- c(idx.distant, irow)
-  #   }
-  # }
-  # if(length(idx.distant) > 1)  t.base <- t.base[-idx.distant,]
+  # remove distant outliers
+  idx.distant <- c()
+  for(irow in 1:nrow(t.base)){
+    if(abs(t.base[irow,'V2'] - t.base[irow,'V4']) > n.distant){
+      idx.distant <- c(idx.distant, irow)
+    }
+  }
+  if(length(idx.distant) > 1)  t.base <- t.base[-idx.distant,]
   
   plot(t.base[,'V4'], t.base[,'V2'])
   
