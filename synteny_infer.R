@@ -28,7 +28,14 @@ checkCorrespToGenome <- function(t, base.fas.fw, base.fas.bw, query.fas, k = 10)
   for(irow in 1:nrow(t)) {
     s1 = toupper(remainLastN(t[irow, 'V8'], k))
     s1 = gsub("\\-","",s1)
-    s2 = toupper(paste0(query.fas[(-(nchar(s1)-1):0) + t[irow, 'V3']], collapse = ''))
+    
+    if(nchar(s1) == 0){
+      s2 = s1
+    } else {
+      s2 = toupper(paste0(query.fas[(-(nchar(s1)-1):0) + t[irow, 'V3']], collapse = ''))
+    }
+    
+    
     if(s1 != s2 ){
       print(irow)
       print(s1)
@@ -38,13 +45,18 @@ checkCorrespToGenome <- function(t, base.fas.fw, base.fas.bw, query.fas, k = 10)
     
     s1 = toupper(remainLastN(t[irow, 'V9'], k))
     s1 = gsub("\\-","",s1)
-    
     if(t$dir[irow] == 0) {
       base.fas = base.fas.fw
     } else {
       base.fas = base.fas.bw
     }
-    s2 = toupper(paste0(base.fas[(-(nchar(s1)-1):0) + t[irow, 'V5']], collapse = ''))
+    
+    if(nchar(s1) == 0){
+      s2 = s1
+    } else {
+      s2 = toupper(paste0(base.fas[(-(nchar(s1)-1):0) + t[irow, 'V5']], collapse = ''))
+    }
+    
     
     if(s1 != s2 ){
       print(irow)
@@ -73,20 +85,24 @@ fixDirection <- function(t, base.fas.bw){
   return(t)
 }
 
-showt <- function(t, irow=NULL){
+showt <- function(t, irow=NULL, chr=F){
+  idx = c(1:5,7,11)
+  if(chr) idx = c(idx, 10)
   if(is.null(irow)){
-    print(t[1:min(100, nrow(t)),c(1:5,7,11)])
+    print(t[1:min(100, nrow(t)),idx])
   } else {
-    print(t[irow,c(1:5,7,11)])
+    print(t[irow,idx])
   }
 }
 
 glueByThreshold <- function(t, thresholds, base.fas.fw, base.fas.bw, query.fas,
-                            file.log = NULL, gap.open = 30, gap.ext = 0.5, maxval = 10^10) {
+                            file.log = NULL, gap.open = 30, gap.ext = 0.5, maxval = 10^10,
+                            base.overlap = T, query.overlap = T) {
   
   if(!is.null(file.log)) {
     write('', file=file.log, append=F)
   }
+  t = orderT(t)
   for(threshold in thresholds) {
     
     irow = 1
@@ -95,21 +111,26 @@ glueByThreshold <- function(t, thresholds, base.fas.fw, base.fas.bw, query.fas,
       # print(irow)
       
       # if a base fragment of irow is already within some base fragment
-      idx = (t[,'V4'] <= t[irow,'V4']) & (t[,'V5'] >= t[irow,'V5'])
-      idx[t$dir != t$dir[irow]] = F
-      idx[irow] = F
-      if (sum(idx) > 0) {
-        irow <- irow + 1
-        next
+      if(base.overlap){
+        idx = (t[,'V4'] <= t[irow,'V4']) & (t[,'V5'] >= t[irow,'V5'])
+        idx[t$dir != t$dir[irow]] = F
+        idx[irow] = F
+        if (sum(idx) > 0) {
+          irow <- irow + 1
+          next
+        }        
       }
+
       
       # if a query fragment of irow is already within some query fragment
-      idx = (t[,'V2'] <= t[irow,'V2']) & (t[,'V3'] >= t[irow,'V3'])
-      idx[t$dir != t$dir[irow]] = F
-      idx[irow] = F
-      if (sum(idx) > 0) {
-        irow <- irow + 1
-        next
+      if(query.overlap){
+        idx = (t[,'V2'] <= t[irow,'V2']) & (t[,'V3'] >= t[irow,'V3'])
+        idx[t$dir != t$dir[irow]] = F
+        idx[irow] = F
+        if (sum(idx) > 0) {
+          irow <- irow + 1
+          next
+        }  
       }
       
       
@@ -118,6 +139,9 @@ glueByThreshold <- function(t, thresholds, base.fas.fw, base.fas.bw, query.fas,
       idx[irow] = maxval
       idx[t[,'V2'] <= t[irow,'V2']] = maxval
       idx[t[,'V4'] <= t[irow,'V4']] = maxval
+      
+      # Chromosomes should match
+      idx[t[,'V10'] != t[irow,'V10']] = maxval
       
       # If new fragment is in irow fragment by query
       idx.inside = (t[,'V2'] >= t[irow,'V2']) & (t[,'V3'] <= t[irow,'V3'])
@@ -165,6 +189,11 @@ glueByThreshold <- function(t, thresholds, base.fas.fw, base.fas.bw, query.fas,
         pos.base.start = max(1, t[irow, 'V5'] - n.char + sumGapLastN(t[irow, 'V9'], n.char))
         pos.base.end = t[idx, 'V4'] + n.char - sumGapFirstN(t[idx, 'V9'], n.char)
         
+        if(pos.base.end >= t[idx, 'V5']) break
+        if(pos.query.end >= t[idx, 'V3']) break
+        if(pos.base.start <= t[irow, 'V4']) break
+        if(pos.query.end <= t[irow, 'V2']) break
+        
         d.tmp = min(pos.query.end - pos.query.start, pos.base.end - pos.base.start)
       }
       
@@ -173,6 +202,7 @@ glueByThreshold <- function(t, thresholds, base.fas.fw, base.fas.bw, query.fas,
       } else {
         base.fas = base.fas.bw
       }
+      
       
       seq.query <- toupper(query.fas.chr[(pos.query.start+1):(pos.query.end-1)])
       seq.base <- toupper(base.fas[(pos.base.start+1):(pos.base.end-1)])  
@@ -281,7 +311,7 @@ getCoverageQuery <- function(t, len){
 }
 
 
-removeShortOverlaps <- function(t, echo=F){
+removeShortOverlaps <- function(t, echo=F, len.min = 200){
   t <- t[order(t[,'V2']),]
   gap.thresh = -10000
   irow = 1
@@ -384,6 +414,7 @@ removeShortOverlaps <- function(t, echo=F){
     }
     irow = irow + 1
   }
+  t = t[t[,'V7'] > len.min,]
   return(t)
 }
 
@@ -466,49 +497,52 @@ additionalLocalAlignments <- function(t, query.fas.chr, base.fas.fw, base.fas.bw
   return(t)
 }
 
-removeCompleteOverlaps <- function(t, n.distant = 1000000, n.short = 200){
+removeCompleteOverlaps <- function(t, n.distant = 1000000, n.short = 200, 
+                                   filter.query = T, filter.base = T){
   rownames(t) <- NULL
   
   # Get initial positions in base sequence
   t.base = t
-  for(irow in 1:nrow(t.base)) {
-    if(t.base[irow, 'dir'] == 1) {
-      
-      b1 <- t.base[irow,'V4']
-      b2 <- t.base[irow,'V5']
-      
-      t.base[irow,'V5'] <- base.len - b1 + 1
-      t.base[irow,'V4'] <- base.len - b2 + 1
-    } 
-  }
-  t.base = t.base[order(t.base['V2']),]
+  t.base[t.base$dir == 1,'V4'] = base.len - t.base[t.base$dir == 1,'V4'] + 1
+  t.base[t.base$dir == 1,'V5'] = base.len - t.base[t.base$dir == 1,'V5'] + 1
+  t.base = t.base[rev(order(t.base['V7'])),]
   
   # ------------------------------
-  # Overlap in base
-  irow = 1
-  while(irow < nrow(t.base)) {
-    # index of all, that overlap with the current one (irow) in the right side
-    idx = which((t.base[,'V4'] <= t.base[irow,'V4']) & 
-                  (t.base[,'V5'] >= t.base[irow,'V5']))
-    if(length(idx) > 1) {
-      t.base = t.base[-irow,] 
-    } else {
-      irow = irow + 1
-    }
-  }
+
   
   # Overlap in query
-  irow = 1
-  while(irow < nrow(t.base)) {
-    # index of all, that overlap with the current one (irow) in the right side
-    idx = which((t.base[,'V2'] <= t.base[irow,'V2']) & 
-                  (t.base[,'V3'] >= t.base[irow,'V3']))
-    if(length(idx) > 1) {
-      t.base = t.base[-irow,] 
-    } else {
-      irow = irow + 1
-    }
+  if(filter.query){
+    irow = 1
+    while(irow < nrow(t.base)) {
+      # print(nrow(t.base))
+      idx = which((t.base[,'V2'] >= t.base[irow,'V2']) & 
+                    (t.base[,'V3'] <= t.base[irow,'V3']))
+      idx = setdiff(idx, irow)
+      if(length(idx) >= 1) {
+        t.base = t.base[-idx,] 
+      } else {
+        irow = irow + 1
+      }
+    }    
   }
+
+  
+  # Overlap in base
+  if(filter.base) {
+    irow = 1
+    while(irow < nrow(t.base)) {
+      # print(nrow(t.base))
+      idx = which((t.base[,'V4'] >= t.base[irow,'V4']) & 
+                    (t.base[,'V5'] <= t.base[irow,'V5']))
+      idx = setdiff(idx, irow)
+      if(length(idx) >= 1) {
+        t.base = t.base[-idx,] 
+      } else {
+        irow = irow + 1
+      }
+    }    
+  }
+
   
   # idx = rep(F, base.len)
   # for(irow in 1:nrow(t.base)){
@@ -545,4 +579,305 @@ removeCompleteOverlaps <- function(t, n.distant = 1000000, n.short = 200){
   t <- t[order(t[,'V2']),]
   
   return(t)
+}
+
+
+setDir <- function(t, base.len){
+  # direction
+  t$dir = c()
+  idx.dir = t[,'V5'] < t[,'V4']
+  pos1 = base.len - t[idx.dir,'V5'] + 1
+  pos2 = base.len - t[idx.dir,'V4'] + 1
+  
+  t[idx.dir,'V5'] <- base.len - t[idx.dir,'V5'] + 1
+  t[idx.dir,'V4'] <- base.len - t[idx.dir,'V4'] + 1
+  t[, 'dir'] = 0
+  t[idx.dir, 'dir'] = 1
+  
+  return(t)
+}
+
+
+
+getT <- function(t.file, query.fas.chr, base.fas.fw, base.fas.bw,
+                 thresholds = c(100, 500, 1000, 1500, 2000), echo=T){
+  # ------- Read blast results -------
+  
+  if(echo) message(paste0(c('Reading', t.file, '...'), collapse = ' '))
+  base.len = length(base.fas.fw)
+  t = read.table(t.file, stringsAsFactors = F, header = F)
+  
+  t <- setDir(t, base.len)
+  
+  # Get right positions
+  start.pos = as.numeric(sapply(strsplit(t[,1], "\\|"), "[", 4)) - 1
+  t[,2:3] = t[,2:3] + start.pos
+  
+  rownames(t) <- NULL
+  
+  # check
+  for(irow in 1:nrow(t)) {
+    if(nchar(t[irow,'V8']) != nchar(t[irow,'V9'])) stop('aaa')
+  }
+  
+  source("/Users/anna/OneDrive/pushkin/cryptic/nanopore/scripts/synteny_infer.R")
+  checkCorrespToGenome(t, query.fas = query.fas.chr, 
+                       base.fas.fw = base.fas.fw, 
+                       base.fas.bw = base.fas.bw)
+  
+  
+  # ------- Grow up the alignment -------
+  
+  ## ---- First glue ----
+  
+  if(echo) message('First glue (exact)...')
+  t <- glueZero(t)
+  
+  ## ---- Pairwise global alignments of gaps ----
+  
+  if(echo) message('Glue with thresholds')
+  t = glueByThreshold(t, thresholds, query.fas = query.fas.chr, 
+                      base.fas.fw = base.fas.fw, 
+                      base.fas.bw = base.fas.bw, file.log=file.log)
+  
+  ## ---- Remove complete overlap from both sides (base an query) ----
+  
+  if(echo) message('Remove complete overlaps')
+  t <- removeCompleteOverlaps(t)
+  
+  ## ---- Remove short overlaps and Local alignments ----
+  
+  # Remove short overlaps
+  if(echo) message('Remove short overlaps')
+  t <- removeShortOverlaps(t, echo = F)
+  
+  # Additional alignments
+  if(echo) message('Additional alignments')
+  nrow.tmp = nrow(t) - 1
+  while(nrow(t) != nrow.tmp) {
+    nrow.tmp = nrow(t)
+    print(nrow.tmp)
+    t <- additionalLocalAlignments(t, query.fas.chr, base.fas.fw, base.fas.bw, echo = F, n.short=100,
+                                   file.log = file.log)
+    t <- glueZero(t)
+    
+    checkCorrespToGenome(t, query.fas = query.fas.chr, 
+                         base.fas.fw = base.fas.fw, 
+                         base.fas.bw = base.fas.bw)
+    
+    t = glueByThreshold(t, thresholds, query.fas = query.fas.chr, 
+                        base.fas.fw = base.fas.fw, 
+                        base.fas.bw = base.fas.bw, file.log=file.log)
+  }
+  
+  return(t)
+}
+
+
+plotSyntenyBlocks <-function(t, base.len){
+  df = c()
+  for(i in 1:nrow(t)) {
+    if(t$dir[i] == 0){
+      df = rbind(df, c(t[i, 'V2'], t[i, 'V4'], i, 0))
+      df = rbind(df, c(t[i, 'V3'], t[i, 'V5'], i, 0))
+    } else {
+      df = rbind(df, c(t[i, 'V2'], base.len - t[i, 'V4'] + 1, i, 1))
+      df = rbind(df, c(t[i, 'V3'], base.len - t[i, 'V5'] + 1, i, 1))
+    }
+    
+  }
+  
+  df = as.data.frame(df)
+  df$clr <- df$V3 %% 2;
+  p <- ggplot(df, aes(x = V1, y=V2, color = as.factor(V4), group=as.factor(V3)  )) + 
+    geom_line(show.legend = FALSE) + theme_bw()
+  return(p)
+}
+
+
+orderT <- function(t, order = 'query'){
+  if(order == 'query'){
+    t = t[order(t[,'V2']),]
+  } else if(order == 'base'){
+    t = t[order(t[,'V4']),]
+  } else {
+    message('Not ordered!')
+  }
+  rownames(t) <- NULL
+  return(t)
+}
+
+getBlastStat <- function(t.reb, cover.cutoff = 0.9, 
+                         flag.max.cover = T,
+                         flag.tot.cover = T,
+                         flag.pers.cover = T,
+                         suff.res = '') {
+  
+  reb.unique = unique(t.reb[, 'V1'])
+  t.reb = t.reb[!duplicated(t.reb[,1:10]),]
+
+  reb.res = c()
+  names.res = c()
+  
+  for(i.reb in 1:length(reb.unique)){
+    reb.name = reb.unique[i.reb]
+    
+    tmp.res = c()
+    names.res = c()
+    
+    len.tmp = as.numeric(strsplit(reb.name, '\\|')[[1]][4])
+    n.names.init = length(names.res)
+    
+    # if record is here
+    
+    t.tmp = t.reb[t.reb[,'V1'] == reb.name,, drop=F]
+    
+    
+    if(flag.max.cover){
+      idx = which(t.tmp[,'V7'] >= cover.cutoff * len.tmp)
+      tmp = length(idx)
+      if(tmp < 1) {
+        tmp = max(t.tmp[,'V7']) / len.tmp
+      }
+      tmp.res = c(tmp.res, tmp)
+      names.res = c(names.res, 'max_coverage')
+    }
+    
+    if(flag.tot.cover){
+      t.coverage = rep(0, len.tmp)
+      for(i.tmp in 1:nrow(t.tmp)) {
+        t.coverage[t.tmp[i.tmp, 'V2']: t.tmp[i.tmp, 'V3']] = 1
+      }
+      t.coverage = sum(t.coverage) / len.tmp 
+      tmp.res = c(tmp.res, t.coverage)
+      names.res = c(names.res, 'tot_coverage')
+    }
+    
+    if(flag.pers.cover){
+      t7 = t.tmp[,'V7'] / len.tmp
+      t7[t7 > 1] = 1
+      tmp = table(c(ceiling(t7*10), 1:10)) - 1  
+      tmp.res = c(tmp.res, rev(tmp))
+      names.res = c(names.res, paste('pers', rev(1:10)/10, sep = '_'))
+    }
+    
+    
+    if(nchar(suff.res) > 0){
+      names.res[(n.names.init+1):length(names.res)] <- 
+        paste(names.res[(n.names.init+1):length(names.res)], suff.res, sep = '_')
+    }
+    
+    names(tmp.res) <- names.res
+    reb.res = rbind(reb.res, tmp.res)
+  }
+  rownames(reb.res) <- reb.unique
+  
+  return(reb.res)
+}
+
+
+# ignore sequences of this size
+# thresh - threshold fo remove reduldant sequencee
+getMobilome <- function(t, base.len, allowed_gap = 5, m.min.length = 15, 
+                        thresh = 0.8, m.max.length = Inf){
+  
+
+  m1 = c()
+  m2 = c()
+  pos.m1 = c()
+  pos.m2 = c()
+  for(irow in 1:nrow(t)){
+    print(irow)
+    s1 = strsplit(t[irow,'V8'], '')[[1]]
+    s2 = strsplit(t[irow,'V9'], '')[[1]]
+    
+    pos = rep(0, length(s1))
+    pos1 = pos; pos1[s1 != '-'] = t[irow,'V2']: t[irow,'V3']
+    pos2 = pos; pos2[s2 != '-'] = t[irow,'V4']: t[irow,'V5']
+    
+    icol = 0
+    while(icol < length(s1)){
+      icol = icol + 1
+      
+      if(s1[icol] == '-') {  # start gaps on query
+        i.start = icol
+        s = c()
+        while((sum(s1[icol:min((icol+allowed_gap), length(s1))] == '-') > 0) && (icol <= length(s1))){
+          s = c(s, s2[icol])
+          icol = icol + 1
+        }
+        i.end = icol - 1
+        
+        if((i.end - i.start + 1) < m.min.length) next
+        if((i.end - i.start + 1) > m.max.length) next
+        
+        # Nucleotide frequences
+        f = table(s)
+        if(max(f) > thresh * length(s)) next
+        
+        # Di-Nucleotide frequences
+        cf = apply(combn(f, 2), 2, sum)
+        if(max(cf) > thresh * length(s)) next
+        
+        if(t[irow, 'dir'] == 1){
+          pos2.start <- base.len - pos2[i.end] + 1
+          pos2.end <- base.len - pos2[i.start] + 1
+        } else {
+          pos2.start <- base.len - pos2[i.end] + 1
+          pos2.end <- base.len - pos2[i.start] + 1
+        }
+        
+        if(i.start == 1){
+          # print(dim(m2))
+          if(length(c(pos2.start, pos2.end, 0, length(s), paste0(s, collapse = ''))) != 5) stop('ddd')
+          m2 = rbind(m2, c(pos2.start, pos2.end, 0, length(s), paste0(s, collapse = ''))) 
+        } else {
+          # print(dim(m2))
+          if(length(c(pos2.start, pos2.end, pos1[i.start-1], length(s), paste0(s, collapse = ''))) != 5) stop('eee')
+          m2 = rbind(m2, c(pos2.start, pos2.end, pos1[i.start-1], length(s), paste0(s, collapse = ''))) 
+        }
+        
+      } else if(s2[icol] == '-') {  # start gaps on query
+        i.start = icol
+        s = c()
+        while((sum(s2[icol:min((icol+allowed_gap), length(s2))] == '-') > 0) && (icol <= length(s2))){
+          s = c(s, s1[icol])
+          icol = icol + 1
+        }
+        i.end = icol - 1
+        if((i.end - i.start + 1) < m.min.length) next
+        if((i.end - i.start + 1) > m.max.length) next
+        
+        # Nucleotide frequences
+        f = table(s)
+        if(max(f) > thresh * length(s)) next
+        
+        # Di-Nucleotide frequences
+        cf = apply(combn(f, 2), 2, sum)
+        if(max(cf) > thresh * length(s)) next
+        
+        if(i.start == 1){
+          # print(dim(m1))
+          if(length(c(pos1[i.start], pos1[i.end], 0, length(s), paste0(s, collapse = ''))) != 5) stop('bb')
+          m1 = rbind(m1, c(pos1[i.start], pos1[i.end], 0, length(s), paste0(s, collapse = '')))  
+        } else {
+          
+          if(t[irow, 'dir'] == 1){
+            pos2.start <- base.len - pos2[i.start-1] + 1
+          } else {
+            pos2.start = pos2[i.start-1]
+          }
+          # print(dim(m1))
+          if(length(c(pos1[i.start], pos1[i.end], pos2.start, length(s), paste0(s, collapse = ''))) != 5) stop('aa')
+          m1 = rbind(m1, c(pos1[i.start], pos1[i.end], pos2.start, length(s), paste0(s, collapse = '')))
+        }
+        
+      }
+    
+      
+      if(sum(is.na(m1)) >0) stop('NA1')
+      if(sum(is.na(m2)) >0) stop('NA2')
+    }
+  }
+  return(path.indels.separate)
 }
