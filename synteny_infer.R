@@ -87,6 +87,8 @@ fixDirection <- function(t, base.fas.bw){
 
 showt <- function(t, irow=NULL, chr=F){
   idx = c(1:5,7,11)
+  irow = irow[irow <= nrow(t)]
+  
   if(chr) idx = c(idx, 10)
   if(is.null(irow)){
     print(t[1:min(100, nrow(t)),idx])
@@ -311,26 +313,27 @@ getCoverageQuery <- function(t, len){
 }
 
 
-removeShortOverlaps <- function(t, echo=F, len.min = 200){
+removeShortOverlaps <- function(t, echo=F, len.min = 200, gap.thresh = 10000,
+                                filter.q = T, filter.b = T){
   t <- t[order(t[,'V2']),]
-  gap.thresh = -10000
+  
   irow = 1
-  while(irow < (nrow(t) -1)) {
+  while(irow < nrow(t)) {
     
-    if(t$dir[irow] != t$dir[irow+1]) {
-      irow = irow + 1
-      next
-    }
+    # if(t$dir[irow] != t$dir[irow+1]) {
+    #   irow = irow + 1
+    #   next
+    # }
     
     gap.q = t[irow + 1,'V2'] - t[irow,'V3'] - 1
     gap.b = t[irow + 1,'V4'] - t[irow,'V5'] - 1
     if(echo) print(c(irow, gap.q, gap.b))
     
-    # if(gap.q == 9807) stop('aa')
     
-    if((gap.q < 0) && (gap.b < 0) && (gap.b < gap.q)) gap.q = 10
+    # if((gap.q < 0) && (gap.b < 0) && (gap.b < gap.q)) gap.q = 10
     
-    if((gap.q < 0) & (gap.q > gap.thresh) & 
+
+    if(filter.q & (gap.q < 0) & (gap.q > -gap.thresh) & 
        (t[irow, 'V2'] < t[irow+1, 'V2']) & (t[irow, 'V3'] < t[irow+1, 'V3'])){
       # overlap from one side
       s.q1 = strsplit(t[irow, 'V8'], '')[[1]]
@@ -359,7 +362,7 @@ removeShortOverlaps <- function(t, echo=F, len.min = 200){
       } else {
         tmp = 1
       }
-    } else if ((gap.b < 0) & (gap.b > gap.thresh) & 
+    } else if (filter.b & (gap.b < 0) & (gap.b > -gap.thresh) & 
                (t[irow, 'V4'] < t[irow+1, 'V4']) & (t[irow, 'V5'] < t[irow+1, 'V5'])) {
       
       # stop('a')
@@ -392,7 +395,6 @@ removeShortOverlaps <- function(t, echo=F, len.min = 200){
     } else {
       tmp = 0
     }
-    
     if(tmp == 1){  # remain a part at the first piece
       # remove a part from the second piece
       t[irow+1, 'V2'] <- t[irow+1, 'V2'] + sum(s.q2 != '-')
@@ -503,8 +505,10 @@ removeCompleteOverlaps <- function(t, n.distant = 1000000, n.short = 200,
   
   # Get initial positions in base sequence
   t.base = t
-  t.base[t.base$dir == 1,'V4'] = base.len - t.base[t.base$dir == 1,'V4'] + 1
-  t.base[t.base$dir == 1,'V5'] = base.len - t.base[t.base$dir == 1,'V5'] + 1
+  tmp  = base.len - t.base[t.base$dir == 1,'V5'] + 1
+  t.base[t.base$dir == 1,'V5'] = base.len - t.base[t.base$dir == 1,'V4'] + 1
+  t.base[t.base$dir == 1,'V4'] = tmp
+  
   t.base = t.base[rev(order(t.base['V7'])),]
   
   # ------------------------------
@@ -516,8 +520,9 @@ removeCompleteOverlaps <- function(t, n.distant = 1000000, n.short = 200,
     while(irow < nrow(t.base)) {
       # print(nrow(t.base))
       idx = which((t.base[,'V2'] >= t.base[irow,'V2']) & 
-                    (t.base[,'V3'] <= t.base[irow,'V3']))
+                    (t.base[,'V3'] <= t.base[irow,'V3']) )#& (t.base$dir == t.base$dir[irow]))
       idx = setdiff(idx, irow)
+      idx = idx[t.base[irow,'V7'] > t.base[idx,'V7']]
       if(length(idx) >= 1) {
         t.base = t.base[-idx,] 
       } else {
@@ -533,8 +538,9 @@ removeCompleteOverlaps <- function(t, n.distant = 1000000, n.short = 200,
     while(irow < nrow(t.base)) {
       # print(nrow(t.base))
       idx = which((t.base[,'V4'] >= t.base[irow,'V4']) & 
-                    (t.base[,'V5'] <= t.base[irow,'V5']))
+                    (t.base[,'V5'] <= t.base[irow,'V5']) )# & (t.base$dir == t.base$dir[irow]))
       idx = setdiff(idx, irow)
+      idx = idx[t.base[irow,'V7'] > t.base[idx,'V7']]
       if(length(idx) >= 1) {
         t.base = t.base[-idx,] 
       } else {
@@ -569,7 +575,7 @@ removeCompleteOverlaps <- function(t, n.distant = 1000000, n.short = 200,
   }
   if(length(idx.distant) > 1)  t.base <- t.base[-idx.distant,]
   
-  plot(t.base[,'V4'], t.base[,'V2'])
+  # plot(t.base[,'V4'], t.base[,'V2'])
   
   t = t[rownames(t.base),]
   t <- t[t[,'V7'] > n.short,]
@@ -711,6 +717,7 @@ getBlastStat <- function(t.reb, cover.cutoff = 0.9,
                          flag.max.cover = T,
                          flag.tot.cover = T,
                          flag.pers.cover = T,
+                         flag.max.cover.one=F,
                          suff.res = '') {
   
   reb.unique = unique(t.reb[, 'V1'])
@@ -743,6 +750,14 @@ getBlastStat <- function(t.reb, cover.cutoff = 0.9,
       names.res = c(names.res, 'max_coverage')
     }
     
+    if(flag.max.cover.one){
+      
+
+      tmp = max(t.tmp[,'V3'] - t.tmp[,'V2'] + 1) / len.tmp
+      tmp.res = c(tmp.res, tmp)
+      names.res = c(names.res, 'max_coverage_one')
+    }
+    
     if(flag.tot.cover){
       t.coverage = rep(0, len.tmp)
       for(i.tmp in 1:nrow(t.tmp)) {
@@ -756,9 +771,9 @@ getBlastStat <- function(t.reb, cover.cutoff = 0.9,
     if(flag.pers.cover){
       t7 = t.tmp[,'V7'] / len.tmp
       t7[t7 > 1] = 1
-      tmp = table(c(ceiling(t7*10), 1:10)) - 1  
+      tmp = table(c(floor(t7*10), 0:10)) - 1  
       tmp.res = c(tmp.res, rev(tmp))
-      names.res = c(names.res, paste('pers', rev(1:10)/10, sep = '_'))
+      names.res = c(names.res, paste('pers', rev(0:10)/10, sep = '_'))
     }
     
     
@@ -879,5 +894,26 @@ getMobilome <- function(t, base.len, allowed_gap = 5, m.min.length = 15,
       if(sum(is.na(m2)) >0) stop('NA2')
     }
   }
-  return(path.indels.separate)
+  return(list(query = m1, base = m2))
 }
+
+addRowsByNames <- function(reb, s.fasta){
+  
+  init.names = rownames(reb)
+  lost.names = setdiff(names(s.fasta), init.names)
+  for(name in lost.names){
+    reb = rbind(reb, rep(0, ncol(reb)))
+  }
+  rownames(reb) <- c(init.names, lost.names)
+  reb <- reb[names(s.fasta),, drop=F]
+  return(reb)
+  
+}
+
+showd <- function(t){
+  t.base
+  links.q = t[2:(nrow(t)),'V2'] - t[1:(nrow(t)-1),'V3'] - 1
+  links.b = t[2:(nrow(t)),'V4'] - t[1:(nrow(t)-1),'V5'] - 1
+  print(cbind(links.q, links.b, t$dir[2:(nrow(t))], t$dir[1:(nrow(t)-1)]))
+}
+
