@@ -85,8 +85,9 @@ fixDirection <- function(t, base.fas.bw){
   return(t)
 }
 
-showt <- function(t, irow=NULL, chr=F){
-  idx = c(1:5,7,11)
+showt <- function(t, irow=NULL, chr=F, add = c()){
+  idx = c(1:5,7,11, add)
+  idx = intersect(idx, 1:ncol(t))
   irow = irow[irow <= nrow(t)]
   
   if(chr) idx = c(idx, 10)
@@ -99,10 +100,10 @@ showt <- function(t, irow=NULL, chr=F){
 
 glueByThreshold <- function(t, thresholds, base.fas.fw, base.fas.bw, query.fas,
                             file.log = NULL, gap.open = 30, gap.ext = 0.5, maxval = 10^10,
-                            base.overlap = T, query.overlap = T) {
+                            base.overlap = T, query.overlap = T, log.append = F) {
   
   if(!is.null(file.log)) {
-    write('', file=file.log, append=F)
+    write('', file=file.log, append=log.append)
   }
   t = orderT(t)
   for(threshold in thresholds) {
@@ -279,7 +280,6 @@ glueZero <- function(t){
       ipos = ipos+1
       next
     }
-    
     # if(idx != (ipos+1)) print(idx)  # glue with not the next record
     
     t[ipos, 'V3'] <- t[idx, 'V3']
@@ -316,7 +316,12 @@ getCoverageQuery <- function(t, len){
 removeShortOverlaps <- function(t, echo=F, len.min = 200, gap.thresh = 10000,
                                 filter.q = T, filter.b = T){
   t <- t[order(t[,'V2']),]
-  
+
+  t.base = t
+  tmp  = base.len - t.base[t.base$dir == 1,'V5'] + 1
+  t.base[t.base$dir == 1,'V5'] = base.len - t.base[t.base$dir == 1,'V4'] + 1
+  t.base[t.base$dir == 1,'V4'] = tmp
+
   irow = 1
   while(irow < nrow(t)) {
     
@@ -327,7 +332,10 @@ removeShortOverlaps <- function(t, echo=F, len.min = 200, gap.thresh = 10000,
     
     gap.q = t[irow + 1,'V2'] - t[irow,'V3'] - 1
     gap.b = t[irow + 1,'V4'] - t[irow,'V5'] - 1
-    if(echo) print(c(irow, gap.q, gap.b))
+    if(echo) print(c(irow, 
+                     t.base[irow + 1,'V2'] - t.base[irow,'V3'] - 1, 
+                     t.base[irow + 1,'V4'] - t.base[irow,'V5'] - 1, 
+                     t$dir[irow], t$dir[irow+1]))
     
     
     # if((gap.q < 0) && (gap.b < 0) && (gap.b < gap.q)) gap.q = 10
@@ -500,7 +508,8 @@ additionalLocalAlignments <- function(t, query.fas.chr, base.fas.fw, base.fas.bw
 }
 
 removeCompleteOverlaps <- function(t, n.distant = 1000000, n.short = 200, 
-                                   filter.query = T, filter.base = T){
+                                   filter.query = T, filter.base = T,
+                                   centromere.pos = NULL){
   rownames(t) <- NULL
   
   # Get initial positions in base sequence
@@ -566,23 +575,71 @@ removeCompleteOverlaps <- function(t, n.distant = 1000000, n.short = 200,
   # coverage = sum(idx) / length(idx)
   # print(coverage)
   
-  # remove distant outliers
-  idx.distant <- c()
-  for(irow in 1:nrow(t.base)){
-    if(abs(t.base[irow,'V2'] - t.base[irow,'V4']) > n.distant){
-      idx.distant <- c(idx.distant, irow)
-    }
-  }
-  if(length(idx.distant) > 1)  t.base <- t.base[-idx.distant,]
+  # if(!is.null(n.short)){
+  #   t.base <- t[t.base[,'V7'] > n.short,]    
+  # }
   
-  # plot(t.base[,'V4'], t.base[,'V2'])
+  # # remove distant outliers
+  # if(!is.null(n.distant)){
+  #   if(is.null(centromere.pos)){
+  #     idx.distant <- c()
+  #     for(irow in 1:nrow(t.base)){
+  #       if(abs(t.base[irow,'V2'] - t.base[irow,'V4']) > n.distant){
+  #         idx.distant <- c(idx.distant, irow)
+  #       }
+  #     }
+  #     if(length(idx.distant) > 1)  t.base <- t.base[-idx.distant,]  
+  #   } else {
+  # 
+  #     t.base = t.base[order(t.base[,'V2']),]
+  #     idx = min(which(!((t.base[,'V2'] <= centromere.pos[1]) & (t.base[,'V3'] <= centromere.pos[2])) )) - 1
+  #     while(t.base[idx,'V7'] > 10000) idx = idx + 1
+  #     cent.start.idx = idx
+  #     
+  #     idx = max(which(!((t.base[,'V2'] >= centromere.pos[1]) & 
+  #                         (t.base[,'V3'] >= centromere.pos[2])) )) + 1
+  #     while(t.base[idx,'V7'] > 10000) idx = idx - 1
+  #     cent.end.idx = idx
+  #     
+  #     t.arms = list( t.base[1:(cent.start.idx-1),], 
+  #                    t.base[(cent.end.idx+1):nrow(t.base),])
+  #     
+  #     for(i.tmp in 1:2){
+  #       #fit linear model
+  #       # lm.res <- summary(lm('V2 ~ offset(1*V4)', t.arms[[i.tmp]][(t.arms[[i.tmp]][,'V7'] > 10^4)&
+  #       #                                                     (t.arms[[i.tmp]]$dir == 0),]))
+  #       # intercept <- lm.res$coefficients[1,1] + 1.5 * lm.res$coefficients[1,2]
+  #       
+  #       y = t.arms[[i.tmp]][(t.arms[[i.tmp]][,'V7'] > 10^4)&
+  #                             +                         (t.arms[[i.tmp]]$dir == 0),]
+  #       intersept <- max(abs(y[,'V2'] - y[,'V4']))
+  #       
+  #       idx.distant <- c()
+  #       for(irow in 1:nrow(t.arms[[i.tmp]])){
+  #         if(abs(t.arms[[i.tmp]][irow,'V2'] - t.arms[[i.tmp]][irow,'V4']) > intercept + n.distant){
+  #           idx.distant <- c(idx.distant, irow)
+  #         }
+  #       }
+  #       if(length(idx.distant) > 1)  t.arms[[i.tmp]] <- t.arms[[i.tmp]][-idx.distant,]  
+  #     }
+  #     t.base = t.base[sort(c(rownames(t.arms[[1]]),
+  #                       rownames(t.arms[[2]]),
+  #                       rownames(t.base[cent.start.idx:cent.end.idx,]))),]
+  #     
+  #   }
+  #   
+  # }
   
   t = t[rownames(t.base),]
-  t <- t[t[,'V7'] > n.short,]
+  
+  # plot(t.base[,'V4'], t.base[,'V2'])
+
+
   
   # plot(t[,'V4'], t[,'V2'])
   
   t <- t[order(t[,'V2']),]
+  rownames(t) <- NULL
   
   return(t)
 }
@@ -680,21 +737,23 @@ getT <- function(t.file, query.fas.chr, base.fas.fw, base.fas.bw,
 }
 
 
-plotSyntenyBlocks <-function(t, base.len){
+plotSyntenyBlocks <-function(t, base.len, idx=NULL){
   df = c()
   for(i in 1:nrow(t)) {
-    if(t$dir[i] == 0){
+    if(t$dir[i] == 0) {
       df = rbind(df, c(t[i, 'V2'], t[i, 'V4'], i, 0))
       df = rbind(df, c(t[i, 'V3'], t[i, 'V5'], i, 0))
     } else {
       df = rbind(df, c(t[i, 'V2'], base.len - t[i, 'V4'] + 1, i, 1))
       df = rbind(df, c(t[i, 'V3'], base.len - t[i, 'V5'] + 1, i, 1))
     }
-    
   }
   
   df = as.data.frame(df)
   df$clr <- df$V3 %% 2;
+  
+  if(!is.null(idx)) df$V4[c(idx*2, (idx*2-1))] = 2
+  
   p <- ggplot(df, aes(x = V1, y=V2, color = as.factor(V4), group=as.factor(V3)  )) + 
     geom_line(show.legend = FALSE) + theme_bw()
   return(p)
@@ -792,9 +851,9 @@ getBlastStat <- function(t.reb, cover.cutoff = 0.9,
 
 
 # ignore sequences of this size
-# thresh - threshold fo remove reduldant sequencee
+# thresh - threshold fo remove reduldant sequences
 getMobilome <- function(t, base.len, allowed_gap = 5, m.min.length = 15, 
-                        thresh = 0.8, m.max.length = Inf){
+                        thresh = 0.8, m.max.length = Inf, echo=F){
   
 
   m1 = c()
@@ -802,7 +861,7 @@ getMobilome <- function(t, base.len, allowed_gap = 5, m.min.length = 15,
   pos.m1 = c()
   pos.m2 = c()
   for(irow in 1:nrow(t)){
-    print(irow)
+    if(echo) print(irow)
     s1 = strsplit(t[irow,'V8'], '')[[1]]
     s2 = strsplit(t[irow,'V9'], '')[[1]]
     
@@ -838,8 +897,8 @@ getMobilome <- function(t, base.len, allowed_gap = 5, m.min.length = 15,
           pos2.start <- base.len - pos2[i.end] + 1
           pos2.end <- base.len - pos2[i.start] + 1
         } else {
-          pos2.start <- base.len - pos2[i.end] + 1
-          pos2.end <- base.len - pos2[i.start] + 1
+          pos2.start <- pos2[i.start]
+          pos2.end <- pos2[i.end]
         }
         
         if(i.start == 1){
@@ -916,4 +975,317 @@ showd <- function(t){
   links.b = t[2:(nrow(t)),'V4'] - t[1:(nrow(t)-1),'V5'] - 1
   print(cbind(links.q, links.b, t$dir[2:(nrow(t))], t$dir[1:(nrow(t)-1)]))
 }
+
+
+njColumns <- function(mx){
+  n.tmp = ncol(mx)
+  d = matrix(0, nrow = n.tmp, ncol = n.tmp, 
+             dimnames = list(colnames(mx), colnames(mx)))
+  for(i in 1:n.tmp){
+    for(j in 1:n.tmp){
+      d[i,j] = sum(mx[,i] != mx[,j])
+    }
+  }
+  d1 <- as.dist(d)
+  tree <- nj(d1)
+  return(tree)
+}
+
+hclustColumns <- function(mx){
+  n.tmp = ncol(mx)
+  d = matrix(0, nrow = n.tmp, ncol = n.tmp, 
+             dimnames = list(colnames(mx), colnames(mx)))
+  for(i in 1:n.tmp){
+    for(j in 1:n.tmp){
+      d[i,j] = sum(mx[,i] != mx[,j])
+    }
+  }
+  d1 <- as.dist(d)
+  hc <- hclust(d1)
+  return(hc)
+}
+
+s2blocks <- function(s, block.len, echo=F){
+  blocks = c()
+  positions = c()
+  block.n = floor(length(s) / block.len)
+  if(block.n == 0){
+    block.n = 1
+  }
+  for(i in 1:block.n){
+    pos.s = 1 + (i-1)*block.len
+    if(i == block.n){
+      pos.e = length(s)
+    } else {
+      pos.e = i*block.len
+    }
+    if(echo) print(c(pos.s, pos.e, pos.e - pos.s + 1))
+    positions = rbind(positions, c(pos.s, pos.e))
+    blocks = c(blocks, paste0(s[pos.s:pos.e], collapse = ''))
+  }
+  return(list(b=blocks, p=positions))
+}
+
+
+alignBlocks <- function(t.arm, irow.q, irow.b, 
+                        query.fas.chr, base.fas.fw,
+                        base.fas.bw, block.len, gap.open=10, gap.ext=0.5,
+                        echo = F, diag.cutoff = 3, rev.compl=F){
+  
+  t.arm.base = t.arm
+  tmp  = base.len - t.arm.base[t.arm.base$dir == 1,'V5'] + 1
+  t.arm.base[t.arm.base$dir == 1,'V5'] = base.len - t.arm.base[t.arm.base$dir == 1,'V4'] + 1
+  t.arm.base[t.arm.base$dir == 1,'V4'] = tmp
+  
+  
+  if(echo) print(c(irow.q, irow.b))
+  s.q = query.fas.chr[(t.arm[irow.q,'V3']+1) : (t.arm[irow.q+1,'V2']-1)]
+  # if(t.arm$dir[irow.b] == 0){
+    s.b = base.fas.fw[(t.arm.base[irow.b,'V5']+1) : (t.arm.base[irow.b+1,'V4']-1)]
+  # } else {
+    # s.b = base.fas.bw[(t.arm[irow.b,'V5']+1) : (t.arm[irow.b+1,'V4']-1)]
+  # }
+  
+  if(rev.compl){
+    s.b = reverseComplement(s.b)
+  }
+  
+  # Split into blocks
+  blocks.q <- s2blocks(s.q, block.len)
+  blocks.b <- s2blocks(s.b, block.len)
+  
+  # Alignments
+  t.tmp = c()
+  mx = matrix(0, nrow = length(blocks.q$b), ncol = length(blocks.b$b))
+  for(i.q in 1:length(blocks.q$b)){
+    for(i.b in 1:length(blocks.b$b)){
+      
+      
+      if(str_count(blocks.q$b[i.q], "n") / nchar(str_count(blocks.q$b[i.q], "n")) > 0.1) next
+      if(str_count(blocks.b$b[i.b], "n") / nchar(str_count(blocks.b$b[i.b], "n")) > 0.1) next
+      
+      if(length(blocks.q$b) >= length(blocks.b$b)){
+        #if((i.q - i.b) > diag.cutoff) next
+        #if(-(i.q - i.b) > length(blocks.q$b) + diag.cutoff) next
+      }
+      # print(c(i.q, i.b))
+      
+      if(length(blocks.q$b) <= length(blocks.b$b)){
+        #if((i.b - i.q) > diag.cutoff) next
+        #if((i.b - i.q) > length(blocks.b$b) + diag.cutoff) next
+      }
+      
+      
+      # print(c(i.q, i.b))
+      
+      localAlign <- pairwiseAlignment(blocks.q$b[i.q], blocks.b$b[i.b], 
+                                      gapOpening = gap.open, gapExtension=gap.ext,
+                                      type="local")
+      pos.s.q = localAlign@pattern@range@start + blocks.q$p[i.q] - 1
+      pos.e.q = localAlign@pattern@range@start + blocks.q$p[i.q] - 1 +
+        localAlign@pattern@range@width - 1
+      
+      pos.s.b = localAlign@subject@range@start + blocks.b$p[i.b] - 1
+      pos.e.b = localAlign@subject@range@start + blocks.b$p[i.b] - 1 +
+        localAlign@subject@range@width - 1
+      
+      s.q.aln <- as.character(alignedPattern(localAlign))
+      s.b.aln <- as.character(alignedSubject(localAlign))
+      
+      if(!rev.compl){
+        dir.tmp = 0
+      } else {
+        dir.tmp = 1
+      }
+      
+      t.tmp = rbind(t.tmp, 
+                    data.frame(V1=paste0(c('betw', i.q, i.b), collapse = '|'),
+                               V2=pos.s.q, V3=pos.e.q, V4=pos.s.b, V5=pos.e.b, V6=100, V7=nchar(s.q.aln), 
+                               V8=s.q.aln, V9=s.b.aln, V10=t.arm[irow.q,'V10'], 
+                               dir=dir.tmp, stringsAsFactors = FALSE))
+      
+      mx[i.q, i.b] = localAlign@pattern@range@width / nchar(blocks.q$b[i.q])
+    }
+    
+  }
+  t.tmp1 = t.tmp
+  
+  if(is.null(t.tmp)) return(list(t = t.tmp, mx = NULL))
+  
+  # Visializations
+  
+  # df <- melt(mx)
+  # ggplot(data = df, aes(x=Var1, y=Var2, fill=value)) + 
+  #   geom_tile() + theme_minimal()
+  
+  
+  # Glue up things
+  t.tmp = t.tmp1
+  
+  t.tmp[,c('V2','V3')] <- t.tmp[,c('V2','V3')] + t.arm[irow.q,'V3']
+  if(rev.compl == FALSE){
+    t.tmp[,c('V4','V5')] <- t.tmp[,c('V4','V5')] + t.arm.base[irow.b,'V5']
+  } else {
+    t.tmp[,c('V4','V5')] <- t.tmp[,c('V4','V5')]  + base.len - t.arm.base[irow.b,'V5'] - length(s.b)
+  }
+  
+  
+  if(nrow(t.tmp) > 1) t.tmp = t.tmp[order(t.tmp[,'V2']),]
+  t.tmp <- t.tmp[t.tmp[,'V7'] > 30,]
+  # print(nrow(t.tmp))
+  # showt(t.tmp)
+  if(nrow(t.tmp) == 0)  return(list(t = NULL, mx = mx))
+  if(nrow(t.tmp) > 1) {
+    t.tmp <- glueZero(t.tmp)
+    t.tmp = t.tmp[order(t.tmp[,'V2']),]
+    t.tmp = glueByThreshold(t.tmp, block.len/2, query.fas = query.fas.chr, 
+                            base.fas.fw = base.fas.fw, 
+                            base.fas.bw = base.fas.bw, gap.open = gap.open)
+    t.tmp <- removeCompleteOverlaps(t.tmp)
+  }
+  # showt(t.tmp)
+  
+  
+  # plotSyntenyBlocks(t.tmp)
+  
+
+  
+  checkCorrespToGenome(t.tmp, query.fas = query.fas.chr, 
+                       base.fas.fw = base.fas.fw, 
+                       base.fas.bw = base.fas.bw)
+  return(list(t = t.tmp, mx = mx))
+}
+
+
+isIntersect <- function(x1, x2, y1, y2){
+  return(!(( x2 < y1 ) || (x1 > y2)))
+}
+
+
+nIntersect <- function(x1, x2, y1, y2){
+  if(!isIntersect(x1, x2, y1, y2)) return(0)
+  return(min(x2 - y1 + 1, y2 - x1 + 1))
+}
+
+tIntersect <- function(t, i, j){
+  return(nIntersect(t[i,'V2'], t[i,'V3'], t[j,'V2'], t[j,'V3']))
+}
+
+
+refineArms <- function(t.arm, block.len = 1000){
+  
+  # gap.open = 10
+  # gap.ext = 0.5
+  # irow = 6
+  
+  
+  irow = 0
+  while(irow < (nrow(t.arm)-1)){
+    irow = irow + 1
+    
+    for(rev.compl in c(FALSE, TRUE)){
+      
+      t.arm.base = t.arm
+      tmp  = base.len - t.arm.base[t.arm.base$dir == 1,'V5'] + 1
+      t.arm.base[t.arm.base$dir == 1,'V5'] = base.len - t.arm.base[t.arm.base$dir == 1,'V4'] + 1
+      t.arm.base[t.arm.base$dir == 1,'V4'] = tmp
+      
+      
+      print(c(irow, rev.compl))
+      
+      irow.q = irow
+      irow.b = irow
+      
+      if(t.arm[irow.q+1,'V2'] - t.arm[irow.q,'V3'] - 1 < block.len) next
+      if(t.arm.base[irow.b+1,'V4'] - t.arm.base[irow.b,'V5'] - 1 < block.len) next
+      
+      if(t.arm[irow.q+1,'V2'] - t.arm[irow.q,'V3'] - 1 > 100 * block.len) next
+      if(t.arm.base[irow.b+1,'V4'] - t.arm.base[irow.b,'V5'] - 1 > 100 * block.len) next
+      
+      
+      # Perform Alignment
+      aln.blocks <- alignBlocks(t.arm, irow.q, irow.b, 
+                                query.fas.chr, base.fas.fw,
+                                base.fas.bw, block.len, rev.compl = rev.compl)
+      t.tmp = aln.blocks$t
+      
+      if(is.null(t.tmp)) next
+      
+      # # Visualisation
+      # df <- melt(aln.blocks$mx)
+      # ggplot(data = df, aes(x=Var1, y=Var2, fill=value)) +
+      #   geom_tile() + theme_minimal()
+      
+      
+      # Split with previous
+      t.tmp = rbind(t.arm[c(irow, irow+1),], t.tmp)
+      
+      t.tmp = glueByThreshold(t.tmp, thresholds, query.fas = query.fas.chr, 
+                              base.fas.fw = base.fas.fw, 
+                              base.fas.bw = base.fas.bw, file.log=file.log, log.append = T)
+      
+      t.tmp = t.tmp[t.tmp[,'V7'] > 500,]
+      
+      if(sum(duplicated(rbind(t.tmp, t.arm[c(irow, irow+1),]))) == 2) next
+      
+      t.arm = rbind(t.arm[-c(irow, irow+1),], t.tmp)
+      t.arm <- t.arm[order(t.arm[,'V2']),]
+      checkCorrespToGenome(t.arm, query.fas = query.fas.chr, 
+                           base.fas.fw = base.fas.fw, 
+                           base.fas.bw = base.fas.bw)
+      
+      
+      showt(t.arm, irow:(irow+5))
+      
+      # irow = irow - 1 + nrow(t.tmp) - 1
+      irow  = irow - 1
+      break 
+      
+
+      # t.arm = afterRefinement(t.arm)
+    }
+  }
+  return(t.arm)
+}
+
+
+afterRefinement <- function(t, min.len = 500){
+  t = t[t[,'V7'] > min.len,]
+  t <- removeCompleteOverlaps(t, n.distant = NULL, filter.base = F)
+  t = t[order(t[, 'V2']),]
+  t <- removeShortOverlaps(t, echo = F, gap.thresh = Inf)
+  t = glueZero(t)
+  t = t[order(t[,'V2']),]
+  
+  return(t)
+}
+
+findPositionInBase <- function(t, pos.search){
+  
+  t.base = t
+  tmp  = base.len - t.base[t.base$dir == 1,'V5'] + 1
+  t.base[t.base$dir == 1,'V5'] = base.len - t.base[t.base$dir == 1,'V4'] + 1
+  t.base[t.base$dir == 1,'V4'] = tmp
+  
+  irows = which((t.base[,'V4'] <= pos.search) & (t.base[,'V5'] >= pos.search))
+  
+  pos.q = c()
+  for(irow in irows){
+    s1 = strsplit(t[irow,'V8'], '')[[1]]
+    s2 = strsplit(t[irow,'V9'], '')[[1]]
+    pos = rep(0, length(s1))
+    pos1 = pos; pos1[s1 != '-'] = t[irow,'V2']: t[irow,'V3']
+    if(t[irow, 'dir'] == 0){
+      pos2 = pos; pos2[s2 != '-'] = t[irow,'V4']: t[irow,'V5']
+    } else {
+      pos2 = pos; pos2[s2 != '-'] = rev(t.base[irow,'V4']: t.base[irow,'V5'])
+    }
+    pos.q = c(pos.q, pos1[pos2 == pos.search] * (-1)^t[irow,'dir'])
+    
+  }
+  return(pos.q)  
+  
+}
+
+
 
