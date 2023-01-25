@@ -102,8 +102,8 @@ ref_pref=${ref_pref//_/$'-'}
 # ==============================================================================
 
  
-#Rscript cmp_genomes.R --path.work ../${pref_global}_consensus/  --file.chr.len.ref ${path_chr_ref}chr_len.rds  --path.aln.pref ../${pref_global}_alignments_   \
-# --alternative.ref ${alternative_ref} \
-#--path.base ${path_chr_ref}  \
-#--n.cores ${cores} --n.chr.ref ${n_chr_ref} --n.chr.acc ${n_chr_query} --ref.acc ${ref_pref} --all.vs.all ${all_cmp}
+Rscript cmp_genomes.R --path.work ../${pref_global}_consensus/  --file.chr.len.ref ${path_chr_ref}chr_len.rds  --path.aln.pref ../${pref_global}_alignments_   \
+--alternative.ref ${alternative_ref} \
+--path.base ${path_chr_ref}  \
+--n.cores ${cores} --n.chr.ref ${n_chr_ref} --n.chr.acc ${n_chr_query} --ref.acc ${ref_pref} --all.vs.all ${all_cmp}
 

@@ -74,6 +74,8 @@ echo $part_len
 echo $all_cmp
 echo $p_ident
 echo $cores
+echo $sort_chr_len
+
 
 # exit 1
 
@@ -117,7 +119,7 @@ Rscript get_alignments_fixed4.R --path.blast ../${pref_global}_blast_res_${ref_p
 --path.gaps ../${pref_global}_gaps_${ref_pref}/  --path.query ${path_chr_acc} \
 --n.chr.ref ${n_chr_ref} --n.chr.acc ${n_chr_query}  --all.vs.all ${all_cmp}
 
-rm -rf ../${pref_global}_blast_res_${ref_pref}/
+#rm -rf ../${pref_global}_blast_res_${ref_pref}/
 
 ./blast_gaps.sh -path_gaps ../${pref_global}_gaps_${ref_pref}/ 
 
@@ -126,7 +128,7 @@ Rscript get_alignments_after4.R --path.blast ../${pref_global}_blast_res_${ref_p
 --path.gaps ../${pref_global}_gaps_${ref_pref}/  --path.query ${path_chr_acc} \
 --n.chr.ref ${n_chr_ref} --n.chr.acc ${n_chr_query}  --all.vs.all ${all_cmp}
 
-rm -rf ../${pref_global}_gaps_${ref_pref}/
+#rm -rf ../${pref_global}_gaps_${ref_pref}/
 
 # -----------------------------------
 

@@ -54,9 +54,8 @@ if (!is.null(opt$type)) query.type <- opt$type
 if (!is.null(opt$n.chr)) n.chr <- as.numeric(opt$n.chr)
 if(!dir.exists(path.chr)) dir.create(path.chr)
 sort.by.lengths = F
-if (!is.null(opt$sort)) sort.by.lengths <- T
-# print(sort.by.lengths)
-
+if (!is.null(opt$sort)) sort.by.lengths <- opt$sort
+message(paste('sort_chr_by_length', sort.by.lengths, sep = ''))
 
 # ------------------------------------------------------------------------------------
 msg = '!!!  Please be sure that all chromosomes in files are sorted in the same order or use \"-s T\" flag  !!!'

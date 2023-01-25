@@ -148,7 +148,8 @@ tmp = foreach(i.chr.pair = 1:nrow(chromosome.pairs))  %dopar% {  # which accessi
     if(!file.exists(f.acc2ref)) next
     t.acc2ref = readRDS(f.acc2ref)
     base.len.ref = chr.len[(chr.len[,1] == base.acc.ref) & (chr.len[,2] == base.chr),3]
-    val = getCorresponding2BasePositions(t.acc2ref, base.len.ref)
+    # val = getCorresponding2BasePositions(t.acc2ref, base.len.ref)
+    val = getCorresponding2BasePositionsSign(t.acc2ref, base.len.ref)
     rm(t.acc2ref)
     
     val.all = cbind(val.all, val)
